@@ -350,7 +350,7 @@ login_manager.login_view = 'login'
 USER_DB = 'web_users.db'
 
 def init_user_db():
-    """Initialize user database"""
+    """Initialize user database with subscription support"""
     conn = sqlite3.connect(USER_DB)
     cursor = conn.cursor()
     
@@ -360,7 +360,14 @@ def init_user_db():
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             email TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            subscription_tier TEXT DEFAULT 'free',
+            monthly_payment REAL DEFAULT 0.0,
+            stripe_customer_id TEXT,
+            stripe_subscription_id TEXT,
+            subscription_status TEXT DEFAULT 'active',
+            max_connections INTEGER DEFAULT 2,
+            last_payment_date DATETIME
         )
     """)
     
@@ -380,27 +387,65 @@ def init_user_db():
         )
     """)
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            activity_type TEXT NOT NULL,
+            description TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    """)
+    
     conn.commit()
     conn.close()
 
 init_user_db()
 
+# Helper function to log activity
+def log_activity(user_id, activity_type, description):
+    """Log user activity for tracking"""
+    conn = sqlite3.connect(USER_DB)
+    cursor = conn.cursor()
+    ip_address = request.remote_addr if request else 'N/A'
+    user_agent = request.headers.get('User-Agent', 'N/A') if request else 'N/A'
+    
+    cursor.execute("""
+        INSERT INTO activity_log (user_id, activity_type, description, ip_address, user_agent)
+        VALUES (?, ?, ?, ?, ?)
+    """, (user_id, activity_type, description, ip_address, user_agent))
+    
+    conn.commit()
+    conn.close()
+    
+    # Also print to console for Render logs
+    print(f"[ACTIVITY] User {user_id} | {activity_type} | {description} | IP: {ip_address}")
+
 class User(UserMixin):
-    def __init__(self, id, username, email):
+    def __init__(self, id, username, email, subscription_tier='free', monthly_payment=0.0, max_connections=2):
         self.id = id
         self.username = username
         self.email = email
+        self.subscription_tier = subscription_tier
+        self.monthly_payment = monthly_payment
+        self.max_connections = max_connections
 
 @login_manager.user_loader
 def load_user(user_id):
     conn = sqlite3.connect(USER_DB)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, email FROM users WHERE id = ?", (user_id,))
+    cursor.execute("""
+        SELECT id, username, email, subscription_tier, monthly_payment, max_connections 
+        FROM users WHERE id = ?
+    """, (user_id,))
     user_data = cursor.fetchone()
     conn.close()
     
     if user_data:
-        return User(user_data[0], user_data[1], user_data[2])
+        return User(user_data[0], user_data[1], user_data[2], user_data[3], user_data[4], user_data[5])
     return None
 
 @app.route('/')
@@ -429,9 +474,15 @@ def login():
         if user_data and check_password_hash(user_data[2], password):
             user = User(user_data[0], user_data[1], user_data[3])
             login_user(user, remember=True)
+            
+            # Log successful login
+            log_activity(user_data[0], 'LOGIN', f'User {username} logged in successfully')
+            
             flash('✅ Login successful!', 'success')
             return redirect(url_for('dashboard'))
         else:
+            # Log failed login attempt
+            print(f"[SECURITY] Failed login attempt for username: {username} from IP: {request.remote_addr}")
             flash('❌ Invalid username or password', 'error')
     
     return render_template('login.html')
@@ -468,7 +519,11 @@ def register():
             (username, password_hash, email)
         )
         conn.commit()
+        user_id = cursor.lastrowid
         conn.close()
+        
+        # Log registration
+        log_activity(user_id, 'REGISTER', f'New user registered: {username} ({email})')
         
         flash('✅ Registration successful! Please login.', 'success')
         return redirect(url_for('login'))
@@ -567,9 +622,23 @@ def save_connection():
         conn = sqlite3.connect(USER_DB)
         cursor = conn.cursor()
         
-        # Check if this is the first connection (make it default)
+        # Check current connection count
         cursor.execute("SELECT COUNT(*) FROM connections WHERE user_id = ?", (current_user.id,))
-        is_first = cursor.fetchone()[0] == 0
+        current_count = cursor.fetchone()[0]
+        
+        # Check if user has reached their limit
+        if current_count >= current_user.max_connections:
+            conn.close()
+            return jsonify({
+                'success': False,
+                'limit_reached': True,
+                'message': f'⚠️ Connection limit reached! Free tier allows {current_user.max_connections} connections. Upgrade to add unlimited connections.',
+                'current_tier': current_user.subscription_tier,
+                'max_connections': current_user.max_connections
+            }), 403
+        
+        # Check if this is the first connection (make it default)
+        is_first = current_count == 0
         
         cursor.execute("""
             INSERT INTO connections (user_id, name, host, port, database, username, password, is_default)
@@ -587,6 +656,9 @@ def save_connection():
         
         conn.commit()
         conn.close()
+        
+        # Log activity
+        log_activity(current_user.id, 'ADD_CONNECTION', f'Added connection: {data["name"]} ({data["host"]})')
         
         return jsonify({
             'success': True,
@@ -779,9 +851,147 @@ def test_page():
     """Test page for debugging connections"""
     return render_template('test_connections.html')
 
+# ============================================================================
+# PRICING & SUBSCRIPTION ROUTES
+# ============================================================================
+
+@app.route('/pricing')
+@login_required
+def pricing():
+    """Pricing page - Pay What You Want model"""
+    conn = sqlite3.connect(USER_DB)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) FROM connections WHERE user_id = ?
+    """, (current_user.id,))
+    connection_count = cursor.fetchone()[0]
+    conn.close()
+    
+    return render_template('pricing.html', 
+                         connection_count=connection_count,
+                         subscription_tier=current_user.subscription_tier,
+                         monthly_payment=current_user.monthly_payment,
+                         max_connections=current_user.max_connections)
+
+@app.route('/api/upgrade-subscription', methods=['POST'])
+@login_required
+def upgrade_subscription():
+    """Handle subscription upgrade"""
+    data = request.json
+    amount = float(data.get('amount', 0))
+    
+    # Validate minimum payment
+    if amount < 5.0:
+        return jsonify({
+            'success': False,
+            'message': '⚠️ Minimum payment is $5/month'
+        }), 400
+    
+    # In production, integrate with Stripe here
+    stripe_api_key = os.environ.get('STRIPE_SECRET_KEY')
+    
+    if stripe_api_key:
+        # Stripe integration (placeholder for now)
+        # TODO: Create Stripe checkout session
+        return jsonify({
+            'success': True,
+            'redirect_to_stripe': True,
+            'message': 'Redirecting to payment...'
+        })
+    else:
+        # Development mode - simulate upgrade
+        conn = sqlite3.connect(USER_DB)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE users 
+            SET subscription_tier = 'paid',
+                monthly_payment = ?,
+                max_connections = 999,
+                subscription_status = 'active',
+                last_payment_date = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (amount, current_user.id))
+        conn.commit()
+        conn.close()
+        
+        # Log activity
+        log_activity(current_user.id, 'UPGRADE', f'Upgraded to paid tier: ${amount}/month')
+        
+        return jsonify({
+            'success': True,
+            'message': f'✅ Upgraded successfully! Now paying ${amount}/month with unlimited connections.',
+            'redirect': url_for('dashboard')
+        })
+
+@app.route('/api/user-stats')
+@login_required
+def user_stats():
+    """Get user subscription stats"""
+    conn = sqlite3.connect(USER_DB)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT COUNT(*) FROM connections WHERE user_id = ?
+    """, (current_user.id,))
+    connection_count = cursor.fetchone()[0]
+    
+    cursor.execute("""
+        SELECT subscription_tier, monthly_payment, max_connections, subscription_status
+        FROM users WHERE id = ?
+    """, (current_user.id,))
+    user_data = cursor.fetchone()
+    
+    conn.close()
+    
+    return jsonify({
+        'subscription_tier': user_data[0],
+        'monthly_payment': user_data[1],
+        'max_connections': user_data[2],
+        'subscription_status': user_data[3],
+        'current_connections': connection_count,
+        'connections_remaining': user_data[2] - connection_count
+    })
+
+@app.route('/admin/activity-log')
+@login_required
+def activity_log():
+    """View activity log (admin only for now)"""
+    conn = sqlite3.connect(USER_DB)
+    cursor = conn.cursor()
+    
+    # Get recent activity for current user
+    cursor.execute("""
+        SELECT activity_type, description, ip_address, created_at
+        FROM activity_log
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 50
+    """, (current_user.id,))
+    
+    activities = cursor.fetchall()
+    conn.close()
+    
+    return jsonify({
+        'activities': [
+            {
+                'type': row[0],
+                'description': row[1],
+                'ip': row[2],
+                'timestamp': row[3]
+            }
+            for row in activities
+        ]
+    })
+
 if __name__ == '__main__':
     # Get port from environment variable (Render provides this)
     port = int(os.environ.get('PORT', 5000))
     # Disable debug in production
     debug = os.environ.get('FLASK_ENV') != 'production'
+    
+    # Print startup info for logs
+    print(f"[STARTUP] PG Monitor starting on port {port}")
+    print(f"[STARTUP] Debug mode: {debug}")
+    print(f"[STARTUP] Environment: {os.environ.get('FLASK_ENV', 'development')}")
+    
     app.run(debug=debug, host='0.0.0.0', port=port)

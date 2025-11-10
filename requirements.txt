@@ -11,3 +11,6 @@ Werkzeug==3.0.1
 
 # Production Server
 gunicorn==21.2.0
+
+# Payment Processing (optional - for future Stripe integration)
+# stripe==7.0.0
