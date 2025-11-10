@@ -16,6 +16,7 @@ Traditional monitoring tools either show too much or too little. **PG-Monitor En
 - 🔌 **Connection Pool Health** - Usage patterns and idle connection tracking
 - 📊 **Index Efficiency Analysis** - Find unused indexes wasting disk space
 - 🧹 **Vacuum Health Scoring** - 0-100 health score with automated recommendations
+- 📊 **Table Statistics Health** - Detect missing/stale statistics impacting query planner performance
 - ☁️ **Cloud-Aware Monitoring** - Auto-detects Azure, AWS, GCP, Heroku deployments
 - 📈 **Historical Trend Analysis** - SQLite-based time-series storage with % change calculations
 
@@ -53,6 +54,32 @@ Traditional monitoring tools either show too much or too little. **PG-Monitor En
 Top Slow Queries:
    🟠 HIGH SEVERITY (5.2s avg, 1,234 calls, 15% of DB time)
    SELECT * FROM orders WHERE status = 'pending'...
+```
+
+### 📊 Table Statistics Health Monitoring
+```
+📊 What This Checks:
+   • Missing statistics: Tables NEVER analyzed (planner has NO data)
+   • Stale statistics: Too many modifications since last ANALYZE
+   • Impact: Wrong indexes, bad row estimates, poor query plans
+
+📋 Summary:
+   Status: 🟠 Warning - Statistics Need Refresh
+   Total Tables Checked: 25
+   🟢 Healthy: 18
+   🟡 Moderate Stale: 3
+   🟠 Warning Stale: 2
+   🔴 Critical Stale: 1
+   🔴 Never Analyzed: 1
+
+💡 Actionable Recommendations:
+   🔴 HIGH: 1 table(s) have NEVER been analyzed
+      Impact: Query planner has NO statistics - may choose worst possible plans
+      Action: Run: ANALYZE public.new_table;
+   
+   🟠 MEDIUM: 2 table(s) have 10-20% modifications since ANALYZE
+      Impact: Statistics becoming stale - query plans may be suboptimal
+      Action: Consider running ANALYZE during maintenance window
 ```
 
 ### ☁️ Intelligent Cloud Detection
@@ -158,6 +185,11 @@ python pg_monitor_enhanced.py --indexes
 python pg_monitor_enhanced.py --vacuum-health
 ```
 
+**Check table statistics health (query planner impact):**
+```bash
+python pg_monitor_enhanced.py --table-statistics
+```
+
 ### All Available Options
 
 ```bash
@@ -166,6 +198,7 @@ python pg_monitor_enhanced.py --vacuum-health
 --query-latency        # Slow queries with severity analysis
 --table-bloat          # Table bloat detection
 --autovacuum           # Autovacuum lag monitoring
+--table-statistics     # Check for missing/stale table statistics (impacts query planner)
 --wal-growth           # WAL growth tracking
 --locks                # Lock contention (who's blocking whom)
 --connections          # Connection pool health

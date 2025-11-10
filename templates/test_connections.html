@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Connections API</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <h1>Debug: Test Connections API</h1>
+    
+    <h2>1. Check if jQuery loaded:</h2>
+    <div id="jqueryStatus"></div>
+    
+    <h2>2. Fetch Connections:</h2>
+    <button onclick="testAPI()">Test API Call</button>
+    <pre id="apiResult"></pre>
+    
+    <h2>3. Debug Info:</h2>
+    <button onclick="testDebug()">Test Debug Endpoint</button>
+    <pre id="debugResult"></pre>
+    
+    <script>
+        // Check jQuery
+        if (typeof jQuery !== 'undefined') {
+            document.getElementById('jqueryStatus').innerHTML = '✅ jQuery loaded: ' + jQuery.fn.jquery;
+        } else {
+            document.getElementById('jqueryStatus').innerHTML = '❌ jQuery NOT loaded!';
+        }
+        
+        function testAPI() {
+            console.log('Testing /api/connections...');
+            
+            $.get('/api/connections')
+                .done(function(data) {
+                    console.log('Success:', data);
+                    document.getElementById('apiResult').textContent = JSON.stringify(data, null, 2);
+                })
+                .fail(function(xhr, status, error) {
+                    console.error('Error:', error);
+                    document.getElementById('apiResult').textContent = 'ERROR: ' + error + '\n\n' + xhr.responseText;
+                });
+        }
+        
+        function testDebug() {
+            console.log('Testing /debug/connections...');
+            
+            $.get('/debug/connections')
+                .done(function(data) {
+                    console.log('Success:', data);
+                    document.getElementById('debugResult').textContent = JSON.stringify(data, null, 2);
+                })
+                .fail(function(xhr, status, error) {
+                    console.error('Error:', error);
+                    document.getElementById('debugResult').textContent = 'ERROR: ' + error + '\n\n' + xhr.responseText;
+                });
+        }
+    </script>
+</body>
+</html>

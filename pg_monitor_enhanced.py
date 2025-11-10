@@ -1365,6 +1365,214 @@ class PGMonitorEnhanced:
             'bloated_tables': bloated_count,
             'avg_hours_since_vacuum': round(stats.get('avg_hours_since_vacuum', 0), 1) if stats.get('avg_hours_since_vacuum') else 'N/A'
         }
+    
+    def get_table_statistics_health(self, staleness_threshold_pct: int = 10) -> Dict[str, Any]:
+        """
+        Check for missing or stale table statistics that can impact query planner performance.
+        
+        Missing/stale statistics cause PostgreSQL query planner to:
+        - Choose wrong indexes (seq scans instead of index scans)
+        - Estimate row counts incorrectly (poor join strategies)
+        - Use inefficient query plans (nested loops instead of hash joins)
+        
+        Args:
+            staleness_threshold_pct: Alert if modifications exceed this % of total rows (default: 10%)
+        
+        Returns:
+            Dictionary with statistics health analysis and actionable recommendations
+        """
+        query = """
+        SELECT 
+            schemaname,
+            relname as tablename,
+            n_live_tup as live_tuples,
+            n_dead_tup as dead_tuples,
+            n_mod_since_analyze as modifications_since_analyze,
+            last_analyze,
+            last_autoanalyze,
+            CASE 
+                WHEN last_analyze IS NULL AND last_autoanalyze IS NULL THEN 'Never'
+                WHEN last_analyze IS NOT NULL AND last_autoanalyze IS NOT NULL THEN
+                    CASE 
+                        WHEN last_analyze > last_autoanalyze THEN 
+                            EXTRACT(EPOCH FROM (NOW() - last_analyze))::int || ' seconds ago (manual)'
+                        ELSE 
+                            EXTRACT(EPOCH FROM (NOW() - last_autoanalyze))::int || ' seconds ago (auto)'
+                    END
+                WHEN last_analyze IS NOT NULL THEN 
+                    EXTRACT(EPOCH FROM (NOW() - last_analyze))::int || ' seconds ago (manual)'
+                ELSE 
+                    EXTRACT(EPOCH FROM (NOW() - last_autoanalyze))::int || ' seconds ago (auto)'
+            END as last_analyze_ago,
+            CASE 
+                WHEN n_live_tup > 0 THEN 
+                    ROUND(100.0 * n_mod_since_analyze / NULLIF(n_live_tup, 0), 2)
+                ELSE 0
+            END as staleness_pct,
+            CASE
+                WHEN last_analyze IS NULL AND last_autoanalyze IS NULL THEN '🔴 Never Analyzed'
+                WHEN n_mod_since_analyze > n_live_tup * 0.2 THEN '🔴 Critical'
+                WHEN n_mod_since_analyze > n_live_tup * 0.1 THEN '🟠 Warning'
+                WHEN n_mod_since_analyze > n_live_tup * 0.05 THEN '🟡 Moderate'
+                ELSE '🟢 Good'
+            END as status,
+            pg_size_pretty(pg_total_relation_size(schemaname||'.'||relname)) as table_size
+        FROM pg_stat_user_tables
+        WHERE n_live_tup > 100  -- Only tables with significant rows
+        ORDER BY 
+            CASE 
+                WHEN last_analyze IS NULL AND last_autoanalyze IS NULL THEN 3
+                WHEN n_mod_since_analyze > n_live_tup * 0.1 THEN 2
+                ELSE 1
+            END DESC,
+            n_mod_since_analyze DESC
+        LIMIT 30;
+        """
+        
+        results = self.execute_query(query)
+        
+        if not results:
+            return {
+                'status': '🟢 All tables have fresh statistics',
+                'summary': {
+                    'total_tables_checked': 0,
+                    'never_analyzed': 0,
+                    'critical_stale': 0,
+                    'warning_stale': 0,
+                    'moderate_stale': 0,
+                    'healthy': 0
+                },
+                'tables': [],
+                'recommendations': []
+            }
+        
+        # Categorize tables
+        never_analyzed = [t for t in results if 'Never' in str(t.get('last_analyze_ago', ''))]
+        critical_stale = [t for t in results if t.get('staleness_pct', 0) and t['staleness_pct'] >= 20]
+        warning_stale = [t for t in results if t.get('staleness_pct', 0) and 10 <= t['staleness_pct'] < 20]
+        moderate_stale = [t for t in results if t.get('staleness_pct', 0) and 5 <= t['staleness_pct'] < 10]
+        
+        # Calculate overall status
+        if never_analyzed or critical_stale:
+            overall_status = '🔴 Critical - Immediate Action Needed'
+            severity = 'critical'
+        elif warning_stale:
+            overall_status = '🟠 Warning - Statistics Need Refresh'
+            severity = 'warning'
+        elif moderate_stale:
+            overall_status = '🟡 Moderate - Monitor Closely'
+            severity = 'info'
+        else:
+            overall_status = '🟢 Healthy - All Statistics Fresh'
+            severity = 'info'
+        
+        # Generate recommendations
+        recommendations = []
+        
+        if never_analyzed:
+            table_list = ', '.join([f"'{t['tablename']}'" for t in never_analyzed[:5]])
+            recommendations.append({
+                'priority': '🔴 HIGH',
+                'issue': f"{len(never_analyzed)} table(s) have NEVER been analyzed",
+                'impact': 'Query planner has NO statistics - may choose worst possible plans',
+                'action': f"Run: ANALYZE {never_analyzed[0]['schemaname']}.{never_analyzed[0]['tablename']}; (or ANALYZE; for all tables)",
+                'tables_affected': len(never_analyzed)
+            })
+        
+        if critical_stale:
+            recommendations.append({
+                'priority': '🔴 HIGH',
+                'issue': f"{len(critical_stale)} table(s) have >20% modifications since ANALYZE",
+                'impact': 'Statistics severely outdated - poor query performance likely',
+                'action': f"Run: ANALYZE {critical_stale[0]['schemaname']}.{critical_stale[0]['tablename']};",
+                'tables_affected': len(critical_stale)
+            })
+        
+        if warning_stale:
+            recommendations.append({
+                'priority': '🟠 MEDIUM',
+                'issue': f"{len(warning_stale)} table(s) have 10-20% modifications since ANALYZE",
+                'impact': 'Statistics becoming stale - query plans may be suboptimal',
+                'action': 'Consider running ANALYZE during maintenance window',
+                'tables_affected': len(warning_stale)
+            })
+        
+        # Auto-analyze threshold hint
+        if critical_stale or warning_stale:
+            recommendations.append({
+                'priority': '💡 TIP',
+                'issue': 'Autovacuum may not be running frequently enough',
+                'impact': 'Tables accumulating too many modifications between auto-analyzes',
+                'action': 'Consider lowering autovacuum_analyze_scale_factor (default: 0.1) or autovacuum_analyze_threshold',
+                'tables_affected': 0
+            })
+        
+        summary = {
+            'total_tables_checked': len(results),
+            'never_analyzed': len(never_analyzed),
+            'critical_stale': len(critical_stale),
+            'warning_stale': len(warning_stale),
+            'moderate_stale': len(moderate_stale),
+            'healthy': len(results) - len(never_analyzed) - len(critical_stale) - len(warning_stale) - len(moderate_stale)
+        }
+        
+        # Save alerts
+        if self.storage:
+            if never_analyzed:
+                for table in never_analyzed:
+                    self.storage.save_alert(
+                        'table_statistics',
+                        'critical',
+                        f"Table {table['tablename']} has NEVER been analyzed",
+                        {
+                            'table': table['tablename'],
+                            'schema': table['schemaname'],
+                            'live_tuples': table['live_tuples'],
+                            'table_size': table['table_size']
+                        }
+                    )
+            
+            if critical_stale:
+                for table in critical_stale:
+                    self.storage.save_alert(
+                        'table_statistics',
+                        'critical',
+                        f"Table {table['tablename']} has {table['staleness_pct']}% stale statistics",
+                        {
+                            'table': table['tablename'],
+                            'schema': table['schemaname'],
+                            'staleness_pct': table['staleness_pct'],
+                            'modifications': table['modifications_since_analyze'],
+                            'live_tuples': table['live_tuples']
+                        }
+                    )
+            
+            if warning_stale:
+                for table in warning_stale:
+                    self.storage.save_alert(
+                        'table_statistics',
+                        'warning',
+                        f"Table {table['tablename']} has {table['staleness_pct']}% stale statistics",
+                        {
+                            'table': table['tablename'],
+                            'schema': table['schemaname'],
+                            'staleness_pct': table['staleness_pct'],
+                            'modifications': table['modifications_since_analyze']
+                        }
+                    )
+            
+            # Save metrics
+            for table in results:
+                if table.get('staleness_pct'):
+                    self.storage.save_metric('table_statistics', table['tablename'], table['staleness_pct'])
+        
+        return {
+            'status': overall_status,
+            'severity': severity,
+            'summary': summary,
+            'tables': results,
+            'recommendations': recommendations
+        }
 
 
 def format_output(data: Any, format_type: str = 'table', colored: bool = True) -> str:
@@ -1420,11 +1628,12 @@ def format_output(data: Any, format_type: str = 'table', colored: bool = True) -
 @click.option('--vacuum-health', is_flag=True, help='Show vacuum health score')
 @click.option('--system-metrics', is_flag=True, help='Show CPU/Memory/IO metrics (on-premise only)')
 @click.option('--transaction-perf', is_flag=True, help='Show transaction performance & benchmarking metrics')
+@click.option('--table-statistics', is_flag=True, help='Check for missing/stale table statistics (impacts query planner)')
 def main(host, port, database, user, password, monitor_all, query_latency, 
          table_bloat, autovacuum, wal_growth, locks, connections, indexes,
          replication, cache, checkpoints, latency_threshold, bloat_threshold, 
          output, watch, no_history, show_trends, show_alerts, trend, summary,
-         disk_usage, vacuum_health, system_metrics, transaction_perf):
+         disk_usage, vacuum_health, system_metrics, transaction_perf, table_statistics):
     """PostgreSQL Enhanced Monitoring CLI - Dashboard Ready"""
     
     # Ask user for mode if no watch interval specified
@@ -1577,7 +1786,8 @@ def main(host, port, database, user, password, monitor_all, query_latency,
     
     # Determine what to monitor
     if not any([monitor_all, query_latency, table_bloat, autovacuum, wal_growth,
-                locks, connections, indexes, replication, cache, checkpoints]):
+                locks, connections, indexes, replication, cache, checkpoints,
+                disk_usage, vacuum_health, system_metrics, transaction_perf, table_statistics]):
         monitor_all = True
     
     def run_monitoring():
@@ -1977,6 +2187,52 @@ def main(host, port, database, user, password, monitor_all, query_latency,
             click.echo("\n🧹 Autovacuum Lag")
             data = monitor.get_autovacuum_lag()
             click.echo(format_output(data, output))
+        
+        if monitor_all or table_statistics:
+            click.echo("\n📊 Table Statistics Health (Query Planner Impact)")
+            click.echo(f"{'─'*70}")
+            click.echo("\n📖 What This Checks:")
+            click.echo("   • Missing statistics: Tables NEVER analyzed (planner has NO data)")
+            click.echo("   • Stale statistics: Too many modifications since last ANALYZE")
+            click.echo("   • Impact: Wrong indexes, bad row estimates, poor query plans")
+            click.echo(f"{'─'*70}")
+            
+            stats_health = monitor.get_table_statistics_health(staleness_threshold_pct=10)
+            
+            # Summary
+            click.echo(f"\n📋 Summary:")
+            click.echo(f"   Status: {stats_health.get('status', 'Unknown')}")
+            
+            if stats_health.get('summary'):
+                summary = stats_health['summary']
+                click.echo(f"   Total Tables Checked: {summary.get('total_tables_checked', 0)}")
+                click.echo(f"   🟢 Healthy: {summary.get('healthy', 0)}")
+                click.echo(f"   🟡 Moderate Stale: {summary.get('moderate_stale', 0)}")
+                click.echo(f"   🟠 Warning Stale: {summary.get('warning_stale', 0)}")
+                click.echo(f"   🔴 Critical Stale: {summary.get('critical_stale', 0)}")
+                click.echo(f"   🔴 Never Analyzed: {summary.get('never_analyzed', 0)}")
+            
+            # Show problematic tables
+            if stats_health.get('tables'):
+                # Filter to show only problematic ones
+                problem_tables = [t for t in stats_health['tables'] 
+                                 if '🔴' in t.get('status', '') or '🟠' in t.get('status', '')]
+                
+                if problem_tables:
+                    click.echo(f"\n⚠️  Problematic Tables:")
+                    click.echo(format_output(problem_tables[:15], output))
+            
+            # Recommendations
+            if stats_health.get('recommendations'):
+                click.echo(f"\n💡 Actionable Recommendations:")
+                for rec in stats_health['recommendations']:
+                    click.echo(f"\n   {rec.get('priority', '')} {rec.get('issue', '')}")
+                    click.echo(f"      Impact: {rec.get('impact', 'Unknown')}")
+                    click.echo(f"      Action: {rec.get('action', 'None')}")
+                    if rec.get('tables_affected', 0) > 0:
+                        click.echo(f"      Affected: {rec['tables_affected']} table(s)")
+            
+            click.echo(f"{'─'*70}")
         
         if monitor_all or wal_growth:
             click.echo("\n📝 WAL Growth Rate")

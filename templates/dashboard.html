@@ -1,0 +1,1675 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - PG-Monitor{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <!-- Header -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-900">PostgreSQL Monitoring Dashboard</h1>
+        <p class="mt-2 text-gray-600">Real-time database health and performance metrics</p>
+    </div>
+
+    <!-- Connection Selector -->
+    <div class="bg-white rounded-lg shadow mb-6 p-6">
+        <div class="flex justify-between items-center">
+            <div>
+                <label for="connectionSelector" class="block text-sm font-medium text-gray-700 mb-2">Active Connection</label>
+                <select id="connectionSelector" name="connectionSelector" title="Select database connection" aria-label="Database connection selector" class="block w-64 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
+                    <option value="">Select a connection...</option>
+                </select>
+            </div>
+            <div>
+                <a href="{{ url_for('setup_wizard') }}" class="inline-block bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md" title="Add new database connection">
+                    <i class="fas fa-plus mr-2"></i>Add Connection
+                </a>
+                <button type="button" onclick="refreshMetrics()" id="refreshBtn" title="Refresh metrics" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md ml-2">
+                    <i class="fas fa-sync mr-2"></i>Refresh
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" class="text-center py-12 hidden">
+        <i class="fas fa-spinner fa-spin text-4xl text-purple-600 mb-4"></i>
+        <p class="mt-4 text-gray-800 font-semibold text-lg">Loading metrics from PostgreSQL...</p>
+        <p class="mt-2 text-gray-600 text-sm">This may take 5-15 seconds for remote databases</p>
+        <div class="mt-4 max-w-md mx-auto bg-gray-200 rounded-full h-2">
+            <div id="progressBar" class="bg-purple-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+        <p id="loadingStage" class="mt-3 text-gray-500 text-sm">Connecting...</p>
+    </div>
+
+    <!-- Metrics Container -->
+    <div id="metricsContainer" class="hidden">
+        <!-- Database Health Score -->
+        <div id="healthScoreCard" class="bg-gradient-to-r from-green-50 to-blue-50 rounded-lg shadow-lg p-6 mb-6 border-2 border-green-200">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    <div class="bg-white rounded-full p-4 shadow-md">
+                        <i id="healthIcon" class="fas fa-heartbeat text-4xl text-green-600"></i>
+                    </div>
+                    <div class="ml-4">
+                        <h3 class="text-lg font-semibold text-gray-700">Database Health Score</h3>
+                        <p class="text-sm text-gray-600">Real-time performance assessment</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="flex items-baseline">
+                        <span id="healthScore" class="text-5xl font-bold text-green-600">--</span>
+                        <span class="text-2xl text-gray-500 ml-2">/100</span>
+                    </div>
+                    <p id="healthStatus" class="text-sm font-semibold text-green-700 mt-1">Calculating...</p>
+                </div>
+            </div>
+            <div class="mt-4">
+                <div class="w-full bg-gray-200 rounded-full h-3">
+                    <div id="healthBar" class="bg-green-500 h-3 rounded-full transition-all duration-1000" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow p-6 card-hover transition-all">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-purple-100 rounded-md p-3">
+                        <i class="fas fa-server text-purple-600 text-2xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Database Size</p>
+                        <p id="dbSize" class="text-2xl font-bold text-gray-900">--</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6 card-hover transition-all">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-green-100 rounded-md p-3">
+                        <i class="fas fa-bolt text-green-600 text-2xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">TPS</p>
+                        <p id="tps" class="text-2xl font-bold text-gray-900">--</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6 card-hover transition-all">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-blue-100 rounded-md p-3">
+                        <i class="fas fa-plug text-blue-600 text-2xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Connections</p>
+                        <p id="connections" class="text-2xl font-bold text-gray-900">--</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6 card-hover transition-all">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-yellow-100 rounded-md p-3">
+                        <i class="fas fa-database text-yellow-600 text-2xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Cache Hit Ratio</p>
+                        <p id="cacheHit" class="text-2xl font-bold text-gray-900">--</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Charts -->
+        <!-- Top Slow Queries (Full Width) -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h3 class="text-lg font-semibold mb-4">
+                <i class="fas fa-chart-bar text-purple-600 mr-2"></i>Top Slow Queries (CPU Hogs)
+            </h3>
+            <div id="slowQueriesChart" class="overflow-x-auto">
+                <p class="text-gray-500 text-center py-8">Select a connection to view data</p>
+            </div>
+        </div>
+
+        <!-- Table Bloat (Full Width) -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h3 class="text-lg font-semibold mb-4">
+                <i class="fas fa-hdd text-red-600 mr-2"></i>Table Bloat
+            </h3>
+            <div id="bloatChart" class="overflow-x-auto">
+                <p class="text-gray-500 text-center py-8">Select a connection to view data</p>
+            </div>
+        </div>
+
+        <!-- Transaction Performance -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h3 class="text-lg font-semibold mb-4">
+                <i class="fas fa-exchange-alt text-green-600 mr-2"></i>Transaction Performance
+            </h3>
+            <div id="transactionMetrics" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <p class="text-sm text-gray-600">TPS (Transactions/Second)</p>
+                    <p id="tpsDetail" class="text-2xl font-bold text-green-600">--</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-600">Rollback Rate</p>
+                    <p id="rollbackRate" class="text-2xl font-bold">--</p>
+                </div>
+                <div>
+                    <p class="text-sm text-gray-600">Deadlocks</p>
+                    <p id="deadlocks" class="text-2xl font-bold">--</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Table Statistics Health (NEW) -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h3 class="text-lg font-semibold mb-4">
+                <i class="fas fa-chart-line text-blue-600 mr-2"></i>Table Statistics Health
+            </h3>
+            <div id="statsHealth"></div>
+        </div>
+
+        <!-- System Metrics -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h3 class="text-lg font-semibold mb-4">
+                <i class="fas fa-tachometer-alt text-orange-600 mr-2"></i>System Metrics
+            </h3>
+            <div id="systemMetrics"></div>
+        </div>
+        
+        <!-- Index Health Analysis -->
+        <div id="indexAnalysis" class="bg-white rounded-lg shadow p-6 mb-8 hidden">
+            <h3 class="text-lg font-semibold mb-4 flex items-center">
+                <i class="fas fa-database text-indigo-600 mr-2"></i>
+                Index Health & Optimization Opportunities
+            </h3>
+            <div id="indexDetails"></div>
+        </div>
+        
+        <!-- SKU-Based Performance Recommendations -->
+        <div id="skuRecommendations" class="bg-white rounded-lg shadow p-6 mb-8 hidden">
+            <h3 class="text-lg font-semibold mb-4 flex items-center">
+                <i class="fas fa-cogs text-purple-600 mr-2"></i>
+                Server Configuration & DBA Recommendations
+                <span id="skuBadge" class="ml-3 text-xs bg-blue-100 text-blue-800 px-3 py-1 rounded-full"></span>
+            </h3>
+            <div id="skuDetails"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Dashboard Version v2.1 - Number conversion fix for all metrics
+console.log('🚀 Dashboard v2.1 loaded - String to number conversion applied');
+
+let selectedConnectionId = null;
+let metricsRefreshInterval = null;
+
+// Load connections on page load
+$(document).ready(function() {
+    console.log('Dashboard ready, loading connections...');
+    loadConnections();
+    
+    $('#connectionSelector').change(function() {
+        selectedConnectionId = $(this).val();
+        if (selectedConnectionId) {
+            loadMetrics();
+            // Auto-refresh every 30 seconds
+            if (metricsRefreshInterval) {
+                clearInterval(metricsRefreshInterval);
+            }
+            metricsRefreshInterval = setInterval(loadMetrics, 30000);
+        }
+    });
+});
+
+function loadConnections() {
+    console.log('Loading connections...');
+    
+    $.get('/api/connections', function(connections) {
+        console.log('Connections received:', connections);
+        
+        const selector = $('#connectionSelector');
+        selector.empty();
+        selector.append('<option value="">Select a connection...</option>');
+        
+        if (connections.length === 0) {
+            console.log('No connections found');
+            selector.append('<option value="" disabled>No connections configured</option>');
+            return;
+        }
+        
+        connections.forEach(function(conn) {
+            const label = conn.is_default ? `${conn.name} (Default)` : conn.name;
+            console.log('Adding connection:', label);
+            selector.append(`<option value="${conn.id}">${label}</option>`);
+            
+            if (conn.is_default) {
+                selector.val(conn.id);
+                selectedConnectionId = conn.id;
+                loadMetrics();
+            }
+        });
+    })
+    .fail(function(xhr, status, error) {
+        console.error('Error loading connections:', error);
+        console.error('Response:', xhr.responseText);
+        alert('Error loading connections: ' + error);
+    });
+}
+
+function refreshMetrics() {
+    if (selectedConnectionId) {
+        loadMetrics();
+    } else {
+        alert('Please select a connection first');
+    }
+}
+
+function loadMetrics() {
+    $('#loadingIndicator').removeClass('hidden');
+    $('#metricsContainer').addClass('hidden');
+    
+    // Reset progress
+    $('#progressBar').css('width', '0%');
+    $('#loadingStage').text('🔌 Connecting to database...');
+    
+    const refreshBtn = $('#refreshBtn');
+    refreshBtn.prop('disabled', true);
+    refreshBtn.html('<i class="fas fa-spinner fa-spin mr-2"></i>Loading...');
+    
+    const startTime = Date.now();
+    let currentData = {};
+    
+    // Stage 1: Fast metrics (2-3 seconds)
+    $('#progressBar').css('width', '15%');
+    $('#loadingStage').text('⚡ Fetching basic metrics...');
+    
+    $.get(`/api/metrics-fast/${selectedConnectionId}`, function(fastData) {
+        console.log('✅ Stage 1 (Fast Metrics) completed:', fastData);
+        
+        currentData = fastData;
+        $('#progressBar').css('width', '40%');
+        $('#loadingStage').text('📊 Analyzing database performance...');
+        
+        // Update basic cards immediately
+        $('#dbSize').text(fastData.metadata?.db_size || '--');
+        $('#connections').text(`${fastData.metadata?.active_connections || 0} / ${fastData.connections?.pool_status?.[0]?.max_conn || '?'}`);
+        
+        // Safe number conversion with fallback
+        const tpsValue = fastData.transaction_perf?.tps_data?.tps;
+        const tps = (typeof tpsValue === 'number') ? tpsValue : parseFloat(tpsValue) || 0;
+        $('#tps').text(tps.toFixed(2));
+        
+        const cacheHitValue = fastData.transaction_perf?.database_stats?.cache_hit_ratio;
+        const cacheHit = (typeof cacheHitValue === 'number') ? cacheHitValue : parseFloat(cacheHitValue) || 0;
+        $('#cacheHit').text(`${cacheHit.toFixed(2)}%`);
+        
+        // Show partial data
+        $('#loadingIndicator').addClass('hidden');
+        $('#metricsContainer').removeClass('hidden');
+        
+        console.log(`🚀 Starting Stage 2 (Full Metrics) for connection ${selectedConnectionId}...`);
+        
+        // Stage 2: Full metrics (slow queries + bloat)
+        $('#progressBar').css('width', '50%');
+        $('#loadingStage').text('🐌 Analyzing slow queries...');
+        
+        $.get(`/api/metrics/${selectedConnectionId}`, function(fullData) {
+            $('#progressBar').css('width', '75%');
+            $('#loadingStage').text('💾 Calculating table bloat...');
+            
+            const loadTime = ((Date.now() - startTime) / 1000).toFixed(1);
+            console.log(`✅ Stage 2 (Full Metrics) completed in ${loadTime}s:`, fullData);
+            console.log('Query Latency (direct array):', fullData.query_latency?.length || 0, 'queries');
+            console.log('Table Bloat (direct array):', fullData.table_bloat?.length || 0, 'tables');
+            console.log('Stats Health (direct array):', fullData.table_stats_health?.length || 0, 'stats');
+            
+            $('#progressBar').css('width', '100%');
+            $('#loadingStage').html(`✅ Complete! <span class="text-gray-400">(${loadTime}s)</span>`);
+            
+            // Update all remaining metrics
+            console.log('🎨 Rendering full metrics...');
+            updateAllMetrics(fullData);
+            
+            // Hide progress after brief delay
+            setTimeout(() => {
+                $('#loadingIndicator').addClass('hidden');
+            }, 1000);
+        })
+        .fail(function(xhr, status, error) {
+            console.error('❌ Stage 2 (Full Metrics) failed:', {
+                status: status,
+                error: error,
+                responseText: xhr.responseText,
+                statusCode: xhr.status
+            });
+            
+            const errorMsg = xhr.responseJSON?.error || error || xhr.statusText || 'Unknown error';
+            $('#loadingStage').html(`❌ Error loading full analysis: ${errorMsg}`);
+            $('#progressBar').css('width', '100%').removeClass('bg-purple-600').addClass('bg-red-600');
+            
+            console.warn('⚠️ Showing basic metrics only. Full analysis failed.');
+            // Don't show alert, just log it - basic metrics are already visible
+        });
+    })
+    .fail(function(xhr) {
+        $('#loadingIndicator').addClass('hidden');
+        
+        const errorMsg = xhr.responseJSON?.error || xhr.statusText || 'Unknown error';
+        alert('❌ Error connecting to database: ' + errorMsg + '\n\nPlease check:\n- Database is accessible\n- User has required permissions');
+    })
+    .always(function() {
+        refreshBtn.prop('disabled', false);
+        refreshBtn.html('<i class="fas fa-sync mr-2"></i>Refresh');
+    });
+}
+
+function updateAllMetrics(data) {
+    // Update summary cards (in case they changed)
+        $('#dbSize').text(data.metadata?.db_size || '--');
+        $('#connections').text(`${data.metadata?.active_connections || 0} / ${data.connections?.pool_status?.[0]?.max_conn || '?'}`);
+        
+        // Transaction performance - Safe number conversion
+        const tpsValue = data.transaction_perf?.tps_data?.tps;
+        const tps = (typeof tpsValue === 'number') ? tpsValue : parseFloat(tpsValue) || 0;
+        $('#tps').text(tps.toFixed(2));
+        $('#tpsDetail').text(tps.toFixed(2));
+        
+        // Cache hit ratio - Safe number conversion
+        const cacheHitValue = data.transaction_perf?.database_stats?.cache_hit_ratio;
+        const cacheHit = (typeof cacheHitValue === 'number') ? cacheHitValue : parseFloat(cacheHitValue) || 0;
+        $('#cacheHit').text(`${cacheHit.toFixed(2)}%`);
+        
+        // Rollback rate - Safe number conversion
+        const rollbackValue = data.transaction_perf?.database_stats?.rollback_pct;
+        const rollbackPct = (typeof rollbackValue === 'number') ? rollbackValue : parseFloat(rollbackValue) || 0;
+        let rollbackClass = 'text-green-600';
+        if (rollbackPct > 5) rollbackClass = 'text-red-600';
+        else if (rollbackPct > 1) rollbackClass = 'text-yellow-600';
+        $('#rollbackRate').html(`<span class="${rollbackClass}">${rollbackPct.toFixed(2)}%</span>`);
+        
+        // Deadlocks
+        const deadlocks = data.transaction_perf?.database_stats?.deadlocks || 0;
+        const deadlockClass = deadlocks > 0 ? 'text-red-600' : 'text-green-600';
+        $('#deadlocks').html(`<span class="${deadlockClass}">${deadlocks}</span>`);
+        
+        console.log('📊 Rendering slow queries...');
+        // Slow queries table
+        renderSlowQueries(data.query_latency);
+        
+        console.log('💾 Rendering table bloat...');
+        // Table bloat
+        renderBloat(data.table_bloat);
+        
+        console.log('📈 Rendering statistics health...');
+        // Table statistics health
+        renderStatsHealth(data.table_stats_health);
+        
+        console.log('🖥️ Rendering system metrics...');
+        // System metrics
+        renderSystemMetrics(data.system_metrics);
+        
+        console.log('💚 Calculating health score...');
+        // Calculate and display health score
+        calculateHealthScore(data);
+        
+        console.log('🔍 Rendering index analysis...');
+        // Index health analysis
+        if (data.index_analysis) {
+            renderIndexAnalysis(data.index_analysis);
+        }
+        
+        console.log('⚙️ Rendering SKU recommendations...');
+        // SKU-based recommendations
+        if (data.server_sku) {
+            renderSKURecommendations(data.server_sku);
+        }
+        
+        console.log('✅ All metrics rendered successfully!');
+}
+
+function renderSlowQueries(queries) {
+    console.log('renderSlowQueries called with:', queries);
+    
+    if (!queries || queries.length === 0) {
+        console.log('No slow queries data');
+        $('#slowQueriesChart').html(`
+            <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6">
+                <div class="text-center mb-4">
+                    <i class="fas fa-check-circle text-green-500 text-4xl mb-2"></i>
+                    <p class="text-green-700 text-lg font-semibold">✅ No slow queries detected!</p>
+                    <p class="text-gray-600 text-sm mt-2">Your database is performing well, or query tracking may not be enabled.</p>
+                </div>
+                
+                <div class="bg-white rounded-lg p-4 mt-4 border-l-4 border-yellow-400">
+                    <h4 class="font-semibold text-yellow-800 mb-3 flex items-center">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        Not Seeing Query Statistics?
+                    </h4>
+                    <p class="text-sm text-gray-700 mb-3">
+                        To track slow queries, PostgreSQL requires the <strong class="text-blue-600">pg_stat_statements</strong> extension.
+                    </p>
+                    
+                    <div class="bg-gray-900 rounded p-3 mb-3">
+                        <p class="text-xs text-gray-400 mb-1">Run these commands as a superuser:</p>
+                        <pre class="text-green-400 text-xs font-mono">-- Step 1: Enable extension
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- Step 2: Verify it's working
+SELECT count(*) FROM pg_stat_statements;
+
+-- Step 3: Check configuration
+SHOW shared_preload_libraries;</pre>
+                    </div>
+                    
+                    <div class="bg-yellow-50 rounded p-3 text-xs text-gray-700">
+                        <p class="font-semibold mb-1">⚠️ Important Notes:</p>
+                        <ul class="list-disc list-inside space-y-1">
+                            <li><code class="bg-gray-200 px-1 rounded">pg_stat_statements</code> must be in <code class="bg-gray-200 px-1 rounded">shared_preload_libraries</code> parameter</li>
+                            <li>Database server restart required after adding to <code class="bg-gray-200 px-1 rounded">shared_preload_libraries</code></li>
+                            <li>For Azure Database for PostgreSQL: Enable via Azure Portal → Server Parameters</li>
+                            <li>For AWS RDS: Modify parameter group and set <code class="bg-gray-200 px-1 rounded">shared_preload_libraries</code></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        `);
+        return;
+    }
+    
+    const totalQueries = queries.length;
+    const showCount = 10;
+    
+    let html = `
+        <div class="mb-3">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600 font-semibold">📊 Showing top ${Math.min(showCount, totalQueries)} of ${totalQueries} slow queries</span>
+                <button 
+                    onclick="toggleAllQueries()" 
+                    id="toggleAllBtn"
+                    class="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white text-xs px-4 py-2 rounded-lg flex items-center transition shadow-md"
+                    title="Expand or collapse all query details">
+                    <i class="fas fa-compress-arrows-alt mr-2" id="toggleAllIcon"></i>
+                    <span id="toggleAllText">Collapse All</span>
+                </button>
+            </div>
+        </div>
+        <div class="space-y-3">`; // Changed to card-based layout
+    
+    queries.slice(0, showCount).forEach(function(q, index) {
+        const avgTime = parseFloat(q.avg_time_ms) || 0;
+        const minTime = parseFloat(q.min_time_ms) || 0;
+        const maxTime = parseFloat(q.max_time_ms) || 0;
+        const stddev = parseFloat(q.stddev_time_ms) || 0;
+        const totalTime = parseFloat(q.total_time_ms) || 0;
+        const calls = parseInt(q.calls) || 0;
+        const pctTime = parseFloat(q.pct_total_time) || 0;
+        
+        // DBA Analysis
+        const timePerCall = avgTime;
+        const isHighVariance = stddev > (avgTime * 0.5); // >50% variance
+        const isFrequent = calls > 1000;
+        const isSlow = avgTime > 1000;
+        
+        // Severity color
+        let severityColor = 'green';
+        let severityIcon = '🟢';
+        let severityLabel = 'Low';
+        
+        if (avgTime > 5000) {
+            severityColor = 'red'; severityIcon = '🔴'; severityLabel = 'Critical';
+        } else if (avgTime > 1000) {
+            severityColor = 'orange'; severityIcon = '🟠'; severityLabel = 'High';
+        } else if (avgTime > 500) {
+            severityColor = 'yellow'; severityIcon = '🟡'; severityLabel = 'Medium';
+        }
+        
+        html += `
+            <div class="border-2 border-${severityColor}-200 rounded-lg bg-white hover:shadow-lg transition">
+                <!-- Header (Always visible) -->
+                <div class="bg-${severityColor}-50 px-4 py-3 cursor-pointer flex items-center justify-between" onclick="toggleQueryDetails(${index})">
+                    <div class="flex-1">
+                        <div class="flex items-center space-x-3 mb-1">
+                            <i id="icon-${index}" class="fas fa-chevron-down text-${severityColor}-600"></i>
+                            <span class="text-xs px-2 py-1 rounded bg-${severityColor}-200 text-${severityColor}-800 font-semibold">
+                                ${severityIcon} ${severityLabel} Priority
+                            </span>
+                            <span class="text-xs text-gray-600">Query #${index + 1}</span>
+                        </div>
+                        <div class="font-mono text-sm text-gray-900 truncate ml-8" title="${q.query_preview}">
+                            ${q.query_preview}
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4 ml-4">
+                        <div class="text-right">
+                            <div class="text-xs text-gray-500">Avg Time</div>
+                            <div class="text-lg font-bold ${isSlow ? 'text-red-600' : 'text-' + severityColor + '-600'}">${avgTime.toFixed(1)}ms</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs text-gray-500">Calls</div>
+                            <div class="text-lg font-semibold ${isFrequent ? 'text-orange-600' : 'text-gray-700'}">${calls.toLocaleString()}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs text-gray-500">% Total</div>
+                            <div class="text-lg font-bold text-purple-600">${pctTime.toFixed(1)}%</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Details (Expanded by default) -->
+                <div id="details-${index}" class="border-t border-${severityColor}-200">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+                        <!-- Performance Stats -->
+                        <div class="bg-gradient-to-br from-blue-50 to-white p-4 rounded-lg shadow-sm border border-blue-200">
+                            <h5 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="fas fa-chart-line mr-2 text-blue-600"></i>
+                                Performance Statistics
+                            </h5>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">⚡ Min Time:</span>
+                                    <span class="font-mono text-green-600 font-semibold">${minTime.toFixed(2)}ms</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">📊 Avg Time:</span>
+                                    <span class="font-mono text-blue-600 font-bold">${avgTime.toFixed(2)}ms</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">🔥 Max Time:</span>
+                                    <span class="font-mono text-red-600 font-semibold">${maxTime.toFixed(2)}ms</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">📈 Std Deviation:</span>
+                                    <span class="font-mono ${isHighVariance ? 'text-orange-600 font-bold' : 'text-gray-700'}">${stddev.toFixed(2)}ms ${isHighVariance ? '⚠️' : ''}</span>
+                                </div>
+                                <div class="flex justify-between border-t border-blue-200 pt-2 mt-2">
+                                    <span class="text-gray-700 font-semibold">⏱️ Total Time:</span>
+                                    <span class="font-mono font-bold text-lg">${(totalTime/1000).toFixed(2)}s</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- DBA Insights -->
+                        <div class="bg-gradient-to-br from-yellow-50 to-white p-4 rounded-lg shadow-sm border border-yellow-200">
+                            <h5 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="fas fa-lightbulb mr-2 text-yellow-500"></i>
+                                DBA Insights & Actions
+                            </h5>
+                            <div class="space-y-3 text-sm">
+                                ${isSlow ? `
+                                    <div class="bg-red-50 border-l-4 border-red-500 p-2 rounded">
+                                        <p class="font-semibold text-red-700 flex items-center">
+                                            <i class="fas fa-clock mr-1"></i>
+                                            Slow Execution Time
+                                        </p>
+                                        <p class="text-gray-700 text-xs mt-1">Avg ${avgTime.toFixed(0)}ms per execution</p>
+                                        <p class="text-xs text-gray-600 mt-1">
+                                            <strong>Common causes:</strong> Missing indexes, table bloat, inefficient joins, or large result sets.
+                                        </p>
+                                        <p class="text-xs text-blue-600 mt-1">
+                                            💡 Use <code class="bg-gray-200 px-1 rounded">EXPLAIN ANALYZE</code> to see execution plan
+                                        </p>
+                                    </div>
+                                ` : ''}
+                                ${isFrequent ? `
+                                    <div class="bg-orange-50 border-l-4 border-orange-500 p-2 rounded">
+                                        <p class="font-semibold text-orange-700 flex items-center">
+                                            <i class="fas fa-sync-alt mr-1"></i>
+                                            High Execution Frequency
+                                        </p>
+                                        <p class="text-gray-700 text-xs mt-1">${calls.toLocaleString()} executions tracked</p>
+                                        <p class="text-xs text-gray-600 mt-1">
+                                            <strong>Impact:</strong> Even fast queries can consume significant resources when called frequently.
+                                        </p>
+                                        <p class="text-xs text-blue-600 mt-1">
+                                            💡 Consider: Application-level caching, connection pooling, or query result caching
+                                        </p>
+                                    </div>
+                                ` : ''}
+                                ${isHighVariance ? `
+                                    <div class="bg-purple-50 border-l-4 border-purple-500 p-2 rounded">
+                                        <p class="font-semibold text-purple-700 flex items-center">
+                                            <i class="fas fa-wave-square mr-1"></i>
+                                            High Performance Variance
+                                        </p>
+                                        <p class="text-gray-700 text-xs mt-1">Standard deviation: ${stddev.toFixed(2)}ms (Range: ${minTime.toFixed(0)}ms - ${maxTime.toFixed(0)}ms)</p>
+                                        <p class="text-xs text-gray-600 mt-1">
+                                            <strong>Possible reasons:</strong> Cache misses, lock contention, I/O spikes, parameter-dependent plans, or varying data volumes.
+                                        </p>
+                                        <p class="text-xs text-blue-600 mt-1">
+                                            💡 Check: <code class="bg-gray-200 px-1 rounded">pg_stat_statements</code> for parameter patterns & cache hit ratios
+                                        </p>
+                                    </div>
+                                ` : ''}
+                                ${!isSlow && !isFrequent && !isHighVariance ? `
+                                    <div class="bg-green-50 border-l-4 border-green-500 p-2 rounded flex items-center">
+                                        <i class="fas fa-check-circle text-green-600 mr-2"></i>
+                                        <span class="text-green-700 font-semibold">Query performance metrics are healthy</span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            
+                            <!-- Critical Review Notice -->
+                            ${isSlow || isFrequent || isHighVariance ? `
+                                <div class="mt-3 space-y-2">
+                                    <div class="bg-gradient-to-r from-red-100 to-orange-100 border border-red-300 rounded p-3">
+                                        <div class="flex items-start">
+                                            <i class="fas fa-exclamation-triangle text-red-600 mt-0.5 mr-2"></i>
+                                            <div class="text-xs">
+                                                <p class="font-bold text-red-800 mb-1">⚠️ REQUIRES YOUR ATTENTION</p>
+                                                <p class="text-gray-800">
+                                                    This query is causing performance issues and <strong>must be reviewed</strong>. 
+                                                    High ${isSlow ? 'execution time' : ''}${isSlow && isFrequent ? ', ' : ''}${isFrequent ? 'call frequency' : ''}${(isSlow || isFrequent) && isHighVariance ? ', and ' : ''}${isHighVariance ? 'variance' : ''} 
+                                                    can significantly impact database performance and user experience.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="bg-gradient-to-r from-yellow-100 to-amber-100 border border-yellow-400 rounded p-3">
+                                        <div class="flex items-start">
+                                            <i class="fas fa-shield-alt text-yellow-700 mt-0.5 mr-2"></i>
+                                            <div class="text-xs">
+                                                <p class="font-bold text-yellow-800 mb-1">🛡️ PRODUCTION SAFETY</p>
+                                                <p class="text-gray-800">
+                                                    <strong>Never apply changes directly to production!</strong> Always test optimizations 
+                                                    (indexes, query rewrites, configuration changes) in a development or staging environment first. 
+                                                    Measure the impact using <code class="bg-gray-200 px-1 rounded text-xs">EXPLAIN ANALYZE</code> 
+                                                    before deploying to production.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="bg-gradient-to-r from-blue-100 to-indigo-100 border border-blue-300 rounded p-3">
+                                        <div class="flex items-start">
+                                            <i class="fas fa-clipboard-check text-blue-700 mt-0.5 mr-2"></i>
+                                            <div class="text-xs">
+                                                <p class="font-bold text-blue-800 mb-1">📋 NEXT STEPS</p>
+                                                <ol class="list-decimal ml-4 text-gray-800 space-y-0.5">
+                                                    <li>Copy the query and run <code class="bg-gray-200 px-1 rounded text-xs">EXPLAIN (ANALYZE, BUFFERS)</code> in test environment</li>
+                                                    <li>Review execution plan for sequential scans, missing indexes, or inefficient joins</li>
+                                                    <li>Test proposed optimizations and compare before/after metrics</li>
+                                                    <li>Document changes and get peer review before production deployment</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    
+                    <!-- Full Query Text -->
+                    <div class="mt-4 bg-gray-900 p-4 rounded-lg relative shadow-lg">
+                        <div class="flex justify-between items-center mb-2">
+                            <h5 class="font-semibold text-white flex items-center">
+                                <i class="fas fa-code mr-2"></i>
+                                Full Query (Sanitized)
+                            </h5>
+                            <button 
+                                onclick="copyQueryToClipboard(${index}, event)" 
+                                id="copy-btn-${index}"
+                                class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded flex items-center transition"
+                                title="Copy query to clipboard">
+                                <i class="fas fa-copy mr-1"></i>
+                                <span id="copy-text-${index}">Copy</span>
+                            </button>
+                        </div>
+                        <pre id="query-text-${index}" class="text-green-400 text-sm font-mono overflow-x-auto whitespace-pre-wrap">${q.query_preview}</pre>
+                        <p class="text-xs text-gray-400 mt-2 flex items-center">
+                            <i class="fas fa-shield-alt mr-1"></i>
+                            Security: Passwords and sensitive data automatically masked
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>'; // Close space-y-3
+    $('#slowQueriesChart').html(html);
+}
+
+function toggleQueryDetails(index) {
+    const details = $(`#details-${index}`);
+    const icon = $(`#icon-${index}`);
+    
+    if (details.hasClass('hidden')) {
+        details.removeClass('hidden');
+        icon.removeClass('fa-chevron-right').addClass('fa-chevron-down');
+    } else {
+        details.addClass('hidden');
+        icon.removeClass('fa-chevron-down').addClass('fa-chevron-right');
+    }
+}
+
+function toggleAllQueries() {
+    const allDetails = $('[id^="details-"]');
+    const allIcons = $('[id^="icon-"]');
+    const toggleBtn = $('#toggleAllBtn');
+    const toggleText = $('#toggleAllText');
+    const toggleIcon = $('#toggleAllIcon');
+    
+    // Check if any are visible (to decide whether to collapse all or expand all)
+    const anyVisible = allDetails.filter(':not(.hidden)').length > 0;
+    
+    if (anyVisible) {
+        // Collapse all
+        allDetails.addClass('hidden');
+        allIcons.removeClass('fa-chevron-down').addClass('fa-chevron-right');
+        toggleText.text('Expand All');
+        toggleIcon.removeClass('fa-compress-arrows-alt').addClass('fa-expand-arrows-alt');
+    } else {
+        // Expand all
+        allDetails.removeClass('hidden');
+        allIcons.removeClass('fa-chevron-right').addClass('fa-chevron-down');
+        toggleText.text('Collapse All');
+        toggleIcon.removeClass('fa-expand-arrows-alt').addClass('fa-compress-arrows-alt');
+    }
+}
+
+function copyQueryToClipboard(index, event) {
+    // Prevent row toggle when clicking copy button
+    event.stopPropagation();
+    
+    const queryText = document.getElementById(`query-text-${index}`).textContent;
+    const copyBtn = $(`#copy-btn-${index}`);
+    const copyText = $(`#copy-text-${index}`);
+    
+    // Copy to clipboard
+    navigator.clipboard.writeText(queryText).then(function() {
+        // Visual feedback
+        copyBtn.removeClass('bg-blue-600 hover:bg-blue-700').addClass('bg-green-600');
+        copyText.html('<i class="fas fa-check mr-1"></i>Copied!');
+        
+        // Reset after 2 seconds
+        setTimeout(function() {
+            copyBtn.removeClass('bg-green-600').addClass('bg-blue-600 hover:bg-blue-700');
+            copyText.html('Copy');
+        }, 2000);
+    }).catch(function(err) {
+        console.error('Failed to copy query:', err);
+        // Fallback: show error
+        copyBtn.removeClass('bg-blue-600 hover:bg-blue-700').addClass('bg-red-600');
+        copyText.text('Failed');
+        
+        setTimeout(function() {
+            copyBtn.removeClass('bg-red-600').addClass('bg-blue-600 hover:bg-blue-700');
+            copyText.text('Copy');
+        }, 2000);
+    });
+}
+
+function renderBloat(bloat) {
+    if (!bloat || bloat.length === 0) {
+        $('#bloatChart').html('<p class="text-green-600 text-center py-4">✅ No significant table bloat!</p>');
+        return;
+    }
+    
+    const totalTables = bloat.length;
+    const showCount = 10; // Show top 10
+    
+    let html = `<div class="mb-2 text-sm text-gray-600">Showing top ${Math.min(showCount, totalTables)} of ${totalTables} tables</div>`;
+    html += '<table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr>';
+    html += '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Table</th>';
+    html += '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bloat %</th>';
+    html += '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Size</th>';
+    html += '</tr></thead><tbody class="bg-white divide-y divide-gray-200">';
+    
+    bloat.slice(0, showCount).forEach(function(b) {
+        const bloatPct = parseFloat(b.bloat_pct) || 0;
+        let bloatClass = 'text-green-600';
+        if (bloatPct > 30) bloatClass = 'text-red-600 font-bold';
+        else if (bloatPct > 20) bloatClass = 'text-orange-600 font-bold';
+        
+        html += '<tr>';
+        html += `<td class="px-3 py-2 text-sm text-gray-900">${b.tablename}</td>`;
+        html += `<td class="px-3 py-2 text-sm ${bloatClass}">${bloatPct.toFixed(2)}%</td>`;
+        html += `<td class="px-3 py-2 text-sm text-gray-900">${b.table_size}</td>`;
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    
+    $('#bloatChart').html(html);
+}
+
+function renderStatsHealth(statsHealth) {
+    if (!statsHealth || !statsHealth.summary) {
+        $('#statsHealth').html('<p class="text-gray-500">No data available</p>');
+        return;
+    }
+    
+    console.log('📊 Stats Health Data:', statsHealth);
+    console.log('📋 Total Tables:', statsHealth.tables?.length);
+    
+    const summary = statsHealth.summary;
+    let html = `<div class="mb-4">`;
+    html += `<p class="text-lg font-semibold">${statsHealth.status}</p>`;
+    html += `<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">`;
+    html += `<div><p class="text-sm text-gray-600">Total</p><p class="text-xl font-bold">${summary.total_tables_checked}</p></div>`;
+    html += `<div><p class="text-sm text-gray-600">🟢 Healthy</p><p class="text-xl font-bold text-green-600">${summary.healthy}</p></div>`;
+    html += `<div><p class="text-sm text-gray-600">🟡 Moderate</p><p class="text-xl font-bold text-yellow-600">${summary.moderate_stale}</p></div>`;
+    html += `<div><p class="text-sm text-gray-600">🟠 Warning</p><p class="text-xl font-bold text-orange-600">${summary.warning_stale}</p></div>`;
+    html += `<div><p class="text-sm text-gray-600">🔴 Critical</p><p class="text-xl font-bold text-red-600">${summary.critical_stale + summary.never_analyzed}</p></div>`;
+    html += `</div></div>`;
+    
+    // Show critical tables with details
+    const criticalTables = statsHealth.tables?.filter(t => 
+        t.staleness_pct >= 20 || t.last_analyze_ago?.includes('Never')
+    ) || [];
+    
+    console.log(`🚨 Critical Tables (staleness >= 20% or Never analyzed): ${criticalTables.length}`, criticalTables);
+    
+    // Show ALL tables, not just critical
+    const allTables = statsHealth.tables || [];
+    
+    if (allTables.length > 0) {
+        html += `<div class="mt-4 border border-gray-300 rounded-lg">`;
+        html += `<div class="bg-gradient-to-r from-blue-50 to-purple-50 px-4 py-3 border-b border-gray-300">`;
+        html += `<h4 class="font-semibold text-gray-800 flex items-center justify-between">`;
+        html += `<span><i class="fas fa-table mr-2"></i>All Tables Statistics (${allTables.length} total)</span>`;
+        html += `<span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">${criticalTables.length} Critical</span>`;
+        html += `</h4>`;
+        html += `</div>`;
+        
+        html += `<div class="overflow-x-auto max-h-96">`;
+        html += `<table class="min-w-full divide-y divide-gray-200 text-sm">`;
+        html += `<thead class="bg-gray-100 sticky top-0"><tr>`;
+        html += `<th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase">Status</th>`;
+        html += `<th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase">Table</th>`;
+        html += `<th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase">Staleness</th>`;
+        html += `<th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase">Last Analyzed</th>`;
+        html += `<th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase">Live Rows</th>`;
+        html += `<th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase">Action</th>`;
+        html += `</tr></thead><tbody class="bg-white divide-y divide-gray-100">`;
+        
+        allTables.forEach(function(t) {
+            const staleness = parseFloat(t.staleness_pct) || 0;
+            const isNeverAnalyzed = t.last_analyze_ago?.includes('Never');
+            const isCritical = staleness >= 20 || isNeverAnalyzed;
+            
+            let statusIcon = '🟢';
+            let statusText = 'Healthy';
+            let rowClass = 'hover:bg-gray-50';
+            let stalenessColor = 'text-green-600';
+            
+            if (isNeverAnalyzed) {
+                statusIcon = '🔴';
+                statusText = 'NEVER';
+                rowClass = 'bg-red-50 hover:bg-red-100';
+                stalenessColor = 'text-red-700 font-bold';
+            } else if (staleness >= 20) {
+                statusIcon = '🔴';
+                statusText = 'Critical';
+                rowClass = 'bg-red-50 hover:bg-red-100';
+                stalenessColor = 'text-red-600 font-bold';
+            } else if (staleness >= 10) {
+                statusIcon = '🟠';
+                statusText = 'Warning';
+                rowClass = 'bg-orange-50 hover:bg-orange-100';
+                stalenessColor = 'text-orange-600 font-semibold';
+            } else if (staleness >= 5) {
+                statusIcon = '🟡';
+                statusText = 'Moderate';
+                rowClass = 'bg-yellow-50 hover:bg-yellow-100';
+                stalenessColor = 'text-yellow-600';
+            }
+            
+            html += `<tr class="${rowClass}">`;
+            html += `<td class="px-3 py-2"><span class="text-xs">${statusIcon} ${statusText}</span></td>`;
+            html += `<td class="px-3 py-2 font-mono text-gray-900 font-semibold">${t.schemaname}.${t.tablename}</td>`;
+            html += `<td class="px-3 py-2 ${stalenessColor}">`;
+            if (isNeverAnalyzed) {
+                html += `<span class="font-bold">NEVER ANALYZED</span>`;
+            } else {
+                html += `${staleness.toFixed(1)}%`;
+            }
+            html += `</td>`;
+            html += `<td class="px-3 py-2 text-gray-600 text-xs">${t.last_analyze_ago || 'Unknown'}</td>`;
+            html += `<td class="px-3 py-2 text-gray-900 text-right">${parseInt(t.live_tuples || 0).toLocaleString()}</td>`;
+            html += `<td class="px-3 py-2">`;
+            if (isCritical) {
+                html += `<button onclick="copyAnalyzeCommand('${t.schemaname}', '${t.tablename}')" `;
+                html += `class="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded flex items-center transition" `;
+                html += `title="Copy ANALYZE command">`;
+                html += `<i class="fas fa-copy mr-1"></i>Analyze`;
+                html += `</button>`;
+            } else {
+                html += `<span class="text-xs text-gray-400">OK</span>`;
+            }
+            html += `</td>`;
+            html += `</tr>`;
+        });
+        
+        html += `</tbody></table></div>`;
+        
+        // Add bulk ANALYZE command for critical tables only
+        if (criticalTables.length > 0) {
+            html += `<div class="bg-gray-900 p-4 border-t border-gray-300">`;
+            html += `<div class="flex justify-between items-center mb-2">`;
+            html += `<p class="text-white text-sm font-semibold flex items-center">`;
+            html += `<i class="fas fa-terminal mr-2"></i>`;
+            html += `Bulk ANALYZE for ${criticalTables.length} Critical Tables:`;
+            html += `</p>`;
+            html += `<button onclick="copyBulkAnalyze()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded transition">`;
+            html += `<i class="fas fa-copy mr-1"></i>Copy All SQL`;
+            html += `</button>`;
+            html += `</div>`;
+            html += `<pre id="bulk-analyze-cmd" class="text-green-400 text-xs font-mono overflow-x-auto">`;
+            criticalTables.forEach((t, i) => {
+                html += `ANALYZE ${t.schemaname}.${t.tablename};${i < criticalTables.length - 1 ? '\n' : ''}`;
+            });
+            html += `</pre>`;
+            html += `</div>`;
+        }
+        html += `</div>`; // Close the border rounded-lg div
+    }
+    
+    if (statsHealth.recommendations && statsHealth.recommendations.length > 0) {
+        html += `<div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mt-4">`;
+        html += `<h4 class="font-semibold text-yellow-800 mb-2">💡 Recommendations</h4>`;
+        statsHealth.recommendations.slice(0, 3).forEach(function(rec) {
+            html += `<div class="text-sm text-yellow-700 mb-2">`;
+            html += `<p><strong>${rec.priority}</strong> ${rec.issue}</p>`;
+            html += `<p class="ml-4 mt-1">→ ${rec.action}</p>`;
+            html += `</div>`;
+        });
+        html += `</div>`;
+    }
+    
+    $('#statsHealth').html(html);
+}
+
+function copyAnalyzeCommand(schema, table) {
+    const cmd = `ANALYZE ${schema}.${table};`;
+    navigator.clipboard.writeText(cmd).then(() => {
+        console.log('✅ ANALYZE command copied:', cmd);
+        alert(`✅ Copied to clipboard:\n${cmd}`);
+    }).catch(err => {
+        console.error('Copy failed:', err);
+    });
+}
+
+function copyBulkAnalyze() {
+    const cmd = document.getElementById('bulk-analyze-cmd').textContent;
+    navigator.clipboard.writeText(cmd).then(() => {
+        console.log('✅ Bulk ANALYZE commands copied');
+        alert(`✅ Copied ${cmd.split('\n').length} ANALYZE commands to clipboard!`);
+    }).catch(err => {
+        console.error('Copy failed:', err);
+    });
+}
+
+function renderSystemMetrics(metrics) {
+    if (!metrics || !metrics.available) {
+        $('#systemMetrics').html(`<div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+            <p class="text-sm text-blue-700">${metrics?.message || 'System metrics not available'}</p>
+        </div>`);
+        return;
+    }
+    
+    let html = '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">';
+    
+    if (metrics.cpu) {
+        html += `<div><p class="text-sm text-gray-600">Active Backends</p>`;
+        html += `<p class="text-2xl font-bold">${metrics.cpu.active_backends} / ${metrics.cpu.total_backends}</p>`;
+        html += `<p class="text-sm text-gray-500">${metrics.cpu.cpu_usage_pct}% CPU Usage</p></div>`;
+    }
+    
+    if (metrics.table_io) {
+        html += `<div><p class="text-sm text-gray-600">Heap Hit Ratio</p>`;
+        html += `<p class="text-2xl font-bold text-green-600">${metrics.table_io.heap_hit_ratio}%</p></div>`;
+        
+        html += `<div><p class="text-sm text-gray-600">Index Hit Ratio</p>`;
+        html += `<p class="text-2xl font-bold text-blue-600">${metrics.table_io.idx_hit_ratio}%</p></div>`;
+    }
+    
+    html += '</div>';
+    $('#systemMetrics').html(html);
+}
+
+// ============================================================================
+// DBA QUICK ACTIONS - Future Features (Coming Soon!)
+// ============================================================================
+
+function calculateHealthScore(data) {
+    /**
+     * DBA-focused health scoring algorithm
+     * Factors: Cache hit ratio, slow queries, bloat, stats freshness, deadlocks
+     */
+    let score = 100;
+    let issues = [];
+    
+    // Factor 1: Cache Hit Ratio (20 points)
+    const cacheHit = parseFloat(data.transaction_perf?.database_stats?.cache_hit_ratio) || 0;
+    if (cacheHit < 90) {
+        const penalty = Math.min(20, (90 - cacheHit) * 2);
+        score -= penalty;
+        issues.push(`Low cache hit ratio: ${cacheHit.toFixed(2)}%`);
+    }
+    
+    // Factor 2: Slow Queries (25 points)
+    const slowQueries = data.query_latency?.length || 0;
+    if (slowQueries > 0) {
+        const criticalQueries = data.query_latency.filter(q => parseFloat(q.avg_time_ms) > 5000).length;
+        const penalty = Math.min(25, (slowQueries * 2) + (criticalQueries * 5));
+        score -= penalty;
+        if (criticalQueries > 0) {
+            issues.push(`${criticalQueries} critical slow queries (>5s)`);
+        }
+    }
+    
+    // Factor 3: Table Bloat (20 points)
+    const bloatedTables = data.table_bloat?.length || 0;
+    if (bloatedTables > 0) {
+        const severeBloat = data.table_bloat.filter(t => parseFloat(t.bloat_pct) > 30).length;
+        const penalty = Math.min(20, (bloatedTables * 2) + (severeBloat * 5));
+        score -= penalty;
+        if (severeBloat > 0) {
+            issues.push(`${severeBloat} tables with >30% bloat`);
+        }
+    }
+    
+    // Factor 4: Stale Statistics (15 points)
+    const statsHealth = data.table_stats_health;
+    if (statsHealth?.summary) {
+        const critical = statsHealth.summary.critical_stale + statsHealth.summary.never_analyzed;
+        if (critical > 0) {
+            const penalty = Math.min(15, critical * 3);
+            score -= penalty;
+            issues.push(`${critical} tables with stale/missing stats`);
+        }
+    }
+    
+    // Factor 5: Rollback Rate (10 points)
+    const rollbackPct = parseFloat(data.transaction_perf?.database_stats?.rollback_pct) || 0;
+    if (rollbackPct > 1) {
+        const penalty = Math.min(10, rollbackPct * 2);
+        score -= penalty;
+        if (rollbackPct > 5) {
+            issues.push(`High rollback rate: ${rollbackPct.toFixed(2)}%`);
+        }
+    }
+    
+    // Factor 6: Deadlocks (10 points)
+    const deadlocks = parseInt(data.transaction_perf?.database_stats?.deadlocks) || 0;
+    if (deadlocks > 0) {
+        const penalty = Math.min(10, deadlocks * 2);
+        score -= penalty;
+        issues.push(`${deadlocks} deadlocks detected`);
+    }
+    
+    // Ensure score stays within 0-100
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    
+    // Determine health status and color
+    let status, color, barColor, iconClass;
+    if (score >= 90) {
+        status = '✅ Excellent';
+        color = 'text-green-600';
+        barColor = 'bg-green-500';
+        iconClass = 'text-green-600';
+    } else if (score >= 75) {
+        status = '👍 Good';
+        color = 'text-blue-600';
+        barColor = 'bg-blue-500';
+        iconClass = 'text-blue-600';
+    } else if (score >= 60) {
+        status = '⚠️ Fair - Needs Attention';
+        color = 'text-yellow-600';
+        barColor = 'bg-yellow-500';
+        iconClass = 'text-yellow-600';
+    } else if (score >= 40) {
+        status = '🔶 Poor - Action Required';
+        color = 'text-orange-600';
+        barColor = 'bg-orange-500';
+        iconClass = 'text-orange-600';
+    } else {
+        status = '🔴 Critical - Immediate Action';
+        color = 'text-red-600';
+        barColor = 'bg-red-500';
+        iconClass = 'text-red-600';
+    }
+    
+    // Update UI
+    $('#healthScore').text(score).removeClass().addClass(`text-5xl font-bold ${color}`);
+    $('#healthStatus').text(status).removeClass().addClass(`text-sm font-semibold ${color} mt-1`);
+    $('#healthIcon').removeClass().addClass(`fas fa-heartbeat text-4xl ${iconClass}`);
+    $('#healthBar').css('width', score + '%').removeClass().addClass(`h-3 rounded-full transition-all duration-1000 ${barColor}`);
+    
+    // Update health card background based on score
+    const cardBg = score >= 75 ? 'from-green-50 to-blue-50 border-green-200' :
+                   score >= 60 ? 'from-yellow-50 to-orange-50 border-yellow-200' :
+                   'from-red-50 to-orange-50 border-red-200';
+    $('#healthScoreCard').removeClass().addClass(`bg-gradient-to-r ${cardBg} rounded-lg shadow-lg p-6 mb-6 border-2`);
+    
+    console.log(`Health Score: ${score}/100 (${status})`);
+    if (issues.length > 0) {
+        console.log('Issues detected:', issues.join(', '));
+    }
+}
+
+function renderIndexAnalysis(indexData) {
+    if (!indexData) {
+        $('#indexAnalysis').addClass('hidden');
+        return;
+    }
+    
+    $('#indexAnalysis').removeClass('hidden');
+    
+    const unusedIndexes = indexData.unused_indexes || [];
+    const lowUsageIndexes = indexData.low_usage_indexes || [];
+    const missingOpportunities = indexData.missing_index_opportunities || [];
+    
+    let html = `
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-gradient-to-br from-red-50 to-orange-50 border border-red-200 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-600">Unused Indexes</p>
+                        <p class="text-3xl font-bold text-red-600">${unusedIndexes.length}</p>
+                        <p class="text-xs text-gray-500 mt-1">Wasting disk space</p>
+                    </div>
+                    <i class="fas fa-trash-alt text-4xl text-red-300"></i>
+                </div>
+            </div>
+            
+            <div class="bg-gradient-to-br from-yellow-50 to-amber-50 border border-yellow-200 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-600">Low Usage Indexes</p>
+                        <p class="text-3xl font-bold text-yellow-600">${lowUsageIndexes.length}</p>
+                        <p class="text-xs text-gray-500 mt-1">Rarely used</p>
+                    </div>
+                    <i class="fas fa-exclamation-triangle text-4xl text-yellow-300"></i>
+                </div>
+            </div>
+            
+            <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-600">Missing Index Opportunities</p>
+                        <p class="text-3xl font-bold text-blue-600">${missingOpportunities.length}</p>
+                        <p class="text-xs text-gray-500 mt-1">High seq scans</p>
+                    </div>
+                    <i class="fas fa-plus-circle text-4xl text-blue-300"></i>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Unused Indexes Section
+    if (unusedIndexes.length > 0) {
+        html += `
+            <div class="bg-red-50 border-l-4 border-red-500 rounded-lg p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h4 class="text-lg font-bold text-red-800 flex items-center">
+                        <i class="fas fa-trash-alt mr-2"></i>
+                        Unused Indexes (${unusedIndexes.length}) - Candidates for Removal
+                    </h4>
+                </div>
+                
+                <div class="bg-yellow-100 border border-yellow-400 rounded p-3 mb-4 text-xs">
+                    <p class="font-semibold text-yellow-800 mb-1">⚠️ Important Considerations:</p>
+                    <ul class="list-disc list-inside text-gray-700 space-y-0.5">
+                        <li><strong>Review carefully</strong> - Some indexes may be used only during specific operations (month-end, reports, batch jobs)</li>
+                        <li><strong>Check application code</strong> - Verify the index isn't referenced in stored procedures or application logic</li>
+                        <li><strong>Test in staging first</strong> - Never drop indexes directly in production without testing</li>
+                        <li><strong>Keep unique constraints</strong> - Don't drop indexes that enforce UNIQUE constraints (check indexdef)</li>
+                        <li><strong>Monitor after changes</strong> - Track query performance after dropping indexes</li>
+                    </ul>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-red-200 text-sm">
+                        <thead class="bg-red-100">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-red-700">Schema</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-red-700">Table</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-red-700">Index Name</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-red-700">Size</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-red-700">Scans</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-red-700">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-red-100">
+        `;
+        
+        unusedIndexes.forEach((idx, i) => {
+            html += `
+                <tr class="hover:bg-red-50">
+                    <td class="px-3 py-2 text-gray-700">${idx.schemaname}</td>
+                    <td class="px-3 py-2 font-mono text-gray-900">${idx.tablename}</td>
+                    <td class="px-3 py-2 font-mono font-semibold text-red-700">${idx.indexname}</td>
+                    <td class="px-3 py-2 text-gray-900">${idx.index_size}</td>
+                    <td class="px-3 py-2 text-red-600 font-bold">${idx.scans}</td>
+                    <td class="px-3 py-2">
+                        <button 
+                            onclick="copyDropIndexSQL('${idx.schemaname}', '${idx.indexname}')" 
+                            class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded transition flex items-center"
+                            title="Copy DROP INDEX command">
+                            <i class="fas fa-copy mr-1"></i> Drop SQL
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Missing Index Opportunities
+    if (missingOpportunities.length > 0) {
+        html += `
+            <div class="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h4 class="text-lg font-bold text-blue-800 flex items-center">
+                        <i class="fas fa-plus-circle mr-2"></i>
+                        Missing Index Opportunities (${missingOpportunities.length}) - High Sequential Scans
+                    </h4>
+                </div>
+                
+                <div class="bg-indigo-100 border border-indigo-400 rounded p-3 mb-4 text-xs">
+                    <p class="font-semibold text-indigo-800 mb-1">📊 Analysis Guidelines:</p>
+                    <ul class="list-disc list-inside text-gray-700 space-y-0.5">
+                        <li><strong>High seq scans (>1000)</strong> + large tables (>10k rows) + low index usage (<50%) = potential index candidate</li>
+                        <li><strong>Use EXPLAIN ANALYZE</strong> to understand which columns are used in WHERE/JOIN clauses</li>
+                        <li><strong>Check query patterns</strong> - Focus on frequently used filter conditions</li>
+                        <li><strong>Consider composite indexes</strong> for multi-column WHERE clauses</li>
+                        <li><strong>Monitor impact</strong> - New indexes speed up reads but slow down writes</li>
+                    </ul>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-blue-200 text-sm">
+                        <thead class="bg-blue-100">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-blue-700">Schema</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-blue-700">Table</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-blue-700">Seq Scans</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-blue-700">Index Usage %</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-blue-700">Live Rows</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-blue-700">Table Size</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-blue-100">
+        `;
+        
+        missingOpportunities.forEach((table) => {
+            const indexUsage = parseFloat(table.index_usage_pct) || 0;
+            const usageColor = indexUsage < 25 ? 'text-red-600' : indexUsage < 50 ? 'text-orange-600' : 'text-yellow-600';
+            
+            html += `
+                <tr class="hover:bg-blue-50">
+                    <td class="px-3 py-2 text-gray-700">${table.schemaname}</td>
+                    <td class="px-3 py-2 font-mono font-semibold text-gray-900">${table.tablename}</td>
+                    <td class="px-3 py-2 text-blue-700 font-bold">${parseInt(table.seq_scan).toLocaleString()}</td>
+                    <td class="px-3 py-2 ${usageColor} font-semibold">${indexUsage.toFixed(1)}%</td>
+                    <td class="px-3 py-2 text-gray-900">${parseInt(table.n_live_tup).toLocaleString()}</td>
+                    <td class="px-3 py-2 text-gray-900">${table.table_size}</td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="mt-4 bg-gradient-to-r from-blue-100 to-indigo-100 border border-blue-300 rounded p-3 text-xs">
+                    <p class="font-bold text-blue-800 mb-1 flex items-center">
+                        <i class="fas fa-lightbulb mr-1"></i>
+                        Next Steps to Identify Missing Indexes:
+                    </p>
+                    <ol class="list-decimal ml-5 text-gray-800 space-y-0.5">
+                        <li>Run <code class="bg-gray-200 px-1 rounded">EXPLAIN (ANALYZE, BUFFERS) SELECT ...</code> on slow queries for these tables</li>
+                        <li>Look for "Seq Scan" operations in the execution plan</li>
+                        <li>Identify columns used in WHERE, JOIN, ORDER BY clauses</li>
+                        <li>Create targeted indexes: <code class="bg-gray-200 px-1 rounded">CREATE INDEX CONCURRENTLY idx_name ON table(column)</code></li>
+                        <li>Rerun EXPLAIN ANALYZE to verify the index is being used</li>
+                    </ol>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Low Usage Indexes
+    if (lowUsageIndexes.length > 0) {
+        html += `
+            <div class="bg-yellow-50 border-l-4 border-yellow-500 rounded-lg p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h4 class="text-lg font-bold text-yellow-800 flex items-center">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        Low Usage Indexes (${lowUsageIndexes.length}) - Review for Optimization
+                    </h4>
+                </div>
+                
+                <p class="text-sm text-gray-700 mb-4">
+                    These indexes have low scan counts relative to sequential scans. They may be candidates for removal or redesign,
+                    but require careful analysis of application queries and workload patterns.
+                </p>
+                
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-yellow-200 text-sm">
+                        <thead class="bg-yellow-100">
+                            <tr>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-yellow-700">Schema</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-yellow-700">Table</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-yellow-700">Index Name</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-yellow-700">Index Scans</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-yellow-700">Usage %</th>
+                                <th class="px-3 py-2 text-left text-xs font-semibold text-yellow-700">Size</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-yellow-100">
+        `;
+        
+        lowUsageIndexes.forEach((idx) => {
+            const usage = parseFloat(idx.index_usage_pct) || 0;
+            html += `
+                <tr class="hover:bg-yellow-50">
+                    <td class="px-3 py-2 text-gray-700">${idx.schemaname}</td>
+                    <td class="px-3 py-2 font-mono text-gray-900">${idx.tablename}</td>
+                    <td class="px-3 py-2 font-mono font-semibold text-yellow-700">${idx.indexname}</td>
+                    <td class="px-3 py-2 text-gray-900">${parseInt(idx.idx_scan).toLocaleString()}</td>
+                    <td class="px-3 py-2 text-orange-600 font-semibold">${usage.toFixed(1)}%</td>
+                    <td class="px-3 py-2 text-gray-900">${idx.index_size}</td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    // All healthy
+    if (unusedIndexes.length === 0 && lowUsageIndexes.length === 0 && missingOpportunities.length === 0) {
+        html += `
+            <div class="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-6 text-center">
+                <i class="fas fa-check-circle text-green-500 text-5xl mb-3"></i>
+                <h4 class="text-xl font-bold text-green-800 mb-2">Excellent Index Health!</h4>
+                <p class="text-gray-700">
+                    No unused indexes detected, and all tables appear to have good index coverage.
+                    Your database indexes are well-optimized!
+                </p>
+            </div>
+        `;
+    }
+    
+    $('#indexDetails').html(html);
+}
+
+// Helper function to show toast notifications
+function showToast(message, type = 'success') {
+    const bgColor = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+    const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+    
+    // Create toast element
+    const toast = $(`
+        <div class="fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50 flex items-center animate-fade-in">
+            <i class="fas ${icon} mr-2"></i>
+            <span>${message}</span>
+        </div>
+    `);
+    
+    $('body').append(toast);
+    
+    // Auto remove after 3 seconds
+    setTimeout(() => {
+        toast.fadeOut(300, () => toast.remove());
+    }, 3000);
+}
+
+// Helper function to copy DROP INDEX SQL
+function copyDropIndexSQL(schema, indexName) {
+    const sql = `-- WARNING: Test in staging environment first!\n-- Verify this index is not needed before dropping\nDROP INDEX ${schema}.${indexName};`;
+    navigator.clipboard.writeText(sql).then(() => {
+        showToast('DROP INDEX command copied to clipboard!', 'success');
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        showToast('Failed to copy to clipboard', 'error');
+    });
+}
+
+function renderSKURecommendations(skuData) {
+    console.log('🔧 renderSKURecommendations called with:', skuData);
+    
+    if (!skuData || skuData.error) {
+        console.log('❌ SKU data missing or has error:', skuData?.error);
+        $('#skuRecommendations').addClass('hidden');
+        return;
+    }
+    
+    $('#skuRecommendations').removeClass('hidden');
+    $('#skuBadge').text(skuData.detected_sku);
+    
+    console.log('📊 Parameter guidance count:', skuData.parameter_guidance?.length || 0);
+    
+    let html = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg">
+            <div class="text-center">
+                <p class="text-sm text-gray-600">Detected Infrastructure</p>
+                <p class="text-lg font-bold text-blue-700">${skuData.is_cloud ? '☁️ Cloud' : '🖥️ On-Premise'}</p>
+            </div>
+            <div class="text-center">
+                <p class="text-sm text-gray-600">Estimated RAM</p>
+                <p class="text-lg font-bold text-purple-700">${skuData.estimated_ram_gb} GB</p>
+            </div>
+            <div class="text-center">
+                <p class="text-sm text-gray-600">Tier Classification</p>
+                <p class="text-lg font-bold text-green-700">${skuData.tier_code.toUpperCase()}</p>
+            </div>
+        </div>
+    `;
+    
+    // Educational Section: Workload Types
+    if (skuData.workload_education) {
+        const edu = skuData.workload_education;
+        html += `
+            <div class="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-lg p-6 mb-6">
+                <h4 class="text-xl font-bold text-indigo-900 mb-4 flex items-center">
+                    <i class="fas fa-graduation-cap mr-2"></i>
+                    ${edu.title}
+                </h4>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <!-- OLTP Characteristics -->
+                    <div class="bg-white rounded-lg p-4 border-l-4 border-green-500">
+                        <h5 class="font-semibold text-green-800 mb-3 flex items-center">
+                            <i class="fas fa-shopping-cart mr-2"></i>
+                            OLTP (Online Transaction Processing)
+                        </h5>
+                        <ul class="text-sm text-gray-700 space-y-2">
+                            ${edu.oltp_characteristics.map(char => `<li>• ${char}</li>`).join('')}
+                        </ul>
+                    </div>
+                    
+                    <!-- OLAP Characteristics -->
+                    <div class="bg-white rounded-lg p-4 border-l-4 border-purple-500">
+                        <h5 class="font-semibold text-purple-800 mb-3 flex items-center">
+                            <i class="fas fa-chart-bar mr-2"></i>
+                            OLAP (Online Analytical Processing)
+                        </h5>
+                        <ul class="text-sm text-gray-700 space-y-2">
+                            ${edu.olap_characteristics.map(char => `<li>• ${char}</li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Tuning Methodology -->
+                <div class="bg-green-50 rounded-lg p-4 border border-green-200">
+                    <h5 class="font-semibold text-green-900 mb-3 flex items-center">
+                        <i class="fas fa-clipboard-check mr-2"></i>
+                        Parameter Tuning Methodology
+                    </h5>
+                    <ol class="text-sm text-gray-800 space-y-2">
+                        ${edu.tuning_methodology.map(step => `<li>${step}</li>`).join('')}
+                    </ol>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Parameter Guidance Section
+    if (skuData.parameter_guidance && skuData.parameter_guidance.length > 0) {
+        html += `
+            <div class="bg-white border border-gray-200 rounded-lg p-6">
+                <h4 class="text-xl font-bold text-gray-900 mb-4 flex items-center">
+                    <i class="fas fa-sliders-h mr-2"></i>
+                    Current PostgreSQL Parameters & Tuning Guidance
+                </h4>
+                <p class="text-sm text-gray-600 mb-6">
+                    ℹ️ These parameters are currently set to <span class="font-semibold">default or configured values</span>. 
+                    Review the guidance below to understand how to tune them based on your specific workload type (OLTP vs OLAP).
+                </p>
+        `;
+        
+        html += `<div class="space-y-6">`;
+        
+        skuData.parameter_guidance.forEach((param, index) => {
+            const categoryColors = {
+                'Memory Management': 'blue',
+                'Query Planning': 'purple',
+                'Query Execution': 'green',
+                'Maintenance Operations': 'yellow',
+                'Connection Management': 'red'
+            };
+            const color = categoryColors[param.category] || 'gray';
+            
+            html += `
+                <div class="border border-${color}-200 rounded-lg overflow-hidden">
+                    <div class="bg-${color}-50 px-4 py-3 border-b border-${color}-200">
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1">
+                                <h5 class="font-semibold text-${color}-900 text-lg">
+                                    ${param.parameter}
+                                    ${param.is_default ? '<span class="ml-2 text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded">DEFAULT</span>' : '<span class="ml-2 text-xs bg-green-200 text-green-700 px-2 py-1 rounded">CONFIGURED</span>'}
+                                </h5>
+                                <p class="text-sm text-${color}-700 mt-1">${param.category}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-xs text-gray-500">Current Value</p>
+                                <p class="text-xl font-bold text-${color}-800">${param.current_value}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-4 space-y-4">
+                        <!-- Industry Baseline -->
+                        <div class="bg-gray-50 p-3 rounded">
+                            <p class="text-xs font-semibold text-gray-600 mb-1">📏 INDUSTRY BASELINE</p>
+                            <p class="text-sm text-gray-800">${param.industry_baseline}</p>
+                        </div>
+                        
+                        <!-- OLTP Guidance -->
+                        <div class="bg-green-50 p-3 rounded border-l-4 border-green-400">
+                            <p class="text-xs font-semibold text-green-700 mb-1 flex items-center">
+                                <i class="fas fa-shopping-cart mr-1"></i>
+                                FOR OLTP WORKLOADS
+                            </p>
+                            <p class="text-sm text-gray-800">${param.oltp_guidance}</p>
+                        </div>
+                        
+                        <!-- OLAP Guidance -->
+                        <div class="bg-purple-50 p-3 rounded border-l-4 border-purple-400">
+                            <p class="text-xs font-semibold text-purple-700 mb-1 flex items-center">
+                                <i class="fas fa-chart-bar mr-1"></i>
+                                FOR OLAP WORKLOADS
+                            </p>
+                            <p class="text-sm text-gray-800">${param.olap_guidance}</p>
+                        </div>
+                        
+                        <!-- Measurement Tip -->
+                        <div class="bg-yellow-50 p-3 rounded">
+                            <p class="text-xs font-semibold text-yellow-700 mb-1 flex items-center">
+                                <i class="fas fa-ruler mr-1"></i>
+                                HOW TO MEASURE EFFECTIVENESS
+                            </p>
+                            <p class="text-sm text-gray-800">${param.measurement_tip}</p>
+                        </div>
+                        
+                        <!-- Tuning Note -->
+                        <div class="bg-blue-50 p-3 rounded">
+                            <p class="text-xs font-semibold text-blue-700 mb-1 flex items-center">
+                                <i class="fas fa-info-circle mr-1"></i>
+                                TUNING CONSIDERATIONS
+                            </p>
+                            <p class="text-sm text-gray-800">${param.tuning_note}</p>
+                        </div>
+                        
+                        <!-- Reference Link -->
+                        <div class="text-center pt-2">
+                            <a href="${param.reference}" target="_blank" class="text-xs text-blue-600 hover:text-blue-800 underline">
+                                📚 Official PostgreSQL Documentation →
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `</div></div>`;
+    }
+    
+    $('#skuDetails').html(html);
+}
+
+function showExportOptions() {
+    alert('📊 Export Feature Coming Soon!\n\n' +
+          'Planned exports:\n' +
+          '✅ PDF Report with all metrics\n' +
+          '✅ Excel spreadsheet for analysis\n' +
+          '✅ JSON for API integration\n' +
+          '✅ Scheduled email reports\n\n' +
+          'Current workaround: Use browser Print to PDF');
+}
+
+function showAlertSettings() {
+    alert('🔔 Alert Configuration Coming Soon!\n\n' +
+          'Planned features:\n' +
+          '✅ Custom thresholds for slow queries\n' +
+          '✅ Email/Slack notifications\n' +
+          '✅ CPU usage alerts\n' +
+          '✅ Table bloat warnings\n' +
+          '✅ Connection pool alerts\n\n' +
+          'Stay tuned for updates!');
+}
+
+function compareConnections() {
+    alert('⚖️ Database Comparison Coming Soon!\n\n' +
+          'Planned features:\n' +
+          '✅ Side-by-side metrics comparison\n' +
+          '✅ Performance benchmarking\n' +
+          '✅ Configuration diff viewer\n' +
+          '✅ Migration readiness check\n\n' +
+          'Perfect for Production vs Staging analysis!');
+}
+
+function showQueryAnalyzer() {
+    alert('🔍 Advanced Query Analyzer Coming Soon!\n\n' +
+          'Planned features:\n' +
+          '✅ Paste query for instant EXPLAIN ANALYZE\n' +
+          '✅ Index recommendations\n' +
+          '✅ Query optimization suggestions\n' +
+          '✅ Execution plan visualization\n' +
+          '✅ Cost estimation\n\n' +
+          'For now: Use EXPLAIN (ANALYZE, BUFFERS) in psql');
+}
+</script>
+{% endblock %}
