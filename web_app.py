@@ -928,6 +928,15 @@ def activity_log():
     conn.close()
     
     return jsonify({
+        'activities': [
+            {
+                'type': activity[0],
+                'description': activity[1],
+                'ip_address': activity[2],
+                'timestamp': activity[3].isoformat() if activity[3] else None
+            } for activity in activities
+        ]
+    })
 
 # USER PROFILE ROUTE
 @app.route('/profile', methods=['GET', 'POST'])
@@ -1005,16 +1014,6 @@ def user_profile():
                          subscription_status=user_data[7],
                          connection_count=connection_count,
                          recent_activity=recent_activity)
-        'activities': [
-            {
-                'type': row[0],
-                'description': row[1],
-                'ip': row[2],
-                'timestamp': row[3]
-            }
-            for row in activities
-        ]
-    })
 
 if __name__ == '__main__':
     # Get port from environment variable (Render provides this)
