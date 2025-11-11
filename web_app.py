@@ -470,12 +470,11 @@ def register():
         
         # Create user
         password_hash = generate_password_hash(password)
-        cursor.execute(
+        user_id = conn.execute_insert(
             "INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)",
             (username, password_hash, email)
         )
         conn.commit()
-        user_id = cursor.lastrowid
         conn.close()
         
         # Log registration

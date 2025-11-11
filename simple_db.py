@@ -13,12 +13,13 @@ from psycopg2.extras import DictCursor
 class PostgreSQLCursorWrapper:
     """Wrapper to make PostgreSQL cursor accept SQLite-style ? placeholders"""
     
-    def __init__(self, cursor):
+    def __init__(self, cursor, db_type='postgresql'):
         self._cursor = cursor
+        self._db_type = db_type
     
     def execute(self, query, params=None):
         """Convert ? to %s for PostgreSQL compatibility"""
-        if params:
+        if params and self._db_type == 'postgresql':
             query = query.replace('?', '%s')
         return self._cursor.execute(query, params)
     
@@ -41,6 +42,16 @@ class PostgreSQLCursorWrapper:
     @property
     def description(self):
         return self._cursor.description
+    
+    @property
+    def lastrowid(self):
+        """Get last inserted row ID - works for both SQLite and PostgreSQL"""
+        if self._db_type == 'postgresql':
+            # For PostgreSQL, we need to fetch from RETURNING clause
+            # This is handled in execute_insert_returning method
+            return None
+        else:
+            return self._cursor.lastrowid
 
 
 class DatabaseConnection:
@@ -65,9 +76,9 @@ class DatabaseConnection:
         """Return cursor that works for both databases"""
         if self.db_type == 'postgresql':
             pg_cursor = self.conn.cursor(cursor_factory=DictCursor)
-            return PostgreSQLCursorWrapper(pg_cursor)
+            return PostgreSQLCursorWrapper(pg_cursor, db_type='postgresql')
         else:
-            return self.conn.cursor()
+            return PostgreSQLCursorWrapper(self.conn.cursor(), db_type='sqlite')
     
     def commit(self):
         """Commit transaction"""
@@ -76,6 +87,25 @@ class DatabaseConnection:
     def close(self):
         """Close connection"""
         self.conn.close()
+    
+    def execute_insert(self, query, params=None):
+        """
+        Execute INSERT and return the new row ID
+        Automatically handles SQLite vs PostgreSQL differences
+        """
+        cursor = self.cursor()
+        
+        if self.db_type == 'postgresql':
+            # Add RETURNING id for PostgreSQL
+            if 'RETURNING' not in query.upper():
+                query = query.rstrip(';') + ' RETURNING id'
+            cursor.execute(query, params)
+            result = cursor.fetchone()
+            return result[0] if result else None
+        else:
+            # SQLite uses lastrowid
+            cursor.execute(query, params)
+            return cursor.lastrowid
     
     def execute(self, query, params=None):
         """
