@@ -68,6 +68,73 @@
                     <div id="healthBar" class="bg-green-500 h-3 rounded-full transition-all duration-1000" style="width: 0%"></div>
                 </div>
             </div>
+            
+            <!-- Health Score Explanation (Collapsible) -->
+            <div class="mt-4 border-t pt-4">
+                <button onclick="toggleHealthExplanation()" class="flex items-center justify-between w-full text-left text-sm text-gray-700 hover:text-purple-600 focus:outline-none">
+                    <span class="font-semibold">
+                        <i class="fas fa-info-circle mr-2"></i>How is this score calculated?
+                    </span>
+                    <i id="explanationIcon" class="fas fa-chevron-down transition-transform"></i>
+                </button>
+                
+                <div id="healthExplanation" class="hidden mt-3 text-sm text-gray-600 space-y-2 bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="font-semibold text-gray-700 mb-2">The health score is calculated based on 5 key metrics:</p>
+                    
+                    <div class="space-y-2">
+                        <div class="flex items-start">
+                            <i class="fas fa-check-circle text-green-500 mt-1 mr-2"></i>
+                            <div>
+                                <span class="font-semibold">Active Connections (20 points):</span>
+                                <p class="text-xs text-gray-600">Measures if you're utilizing your database connections. Too few may indicate underutilization, too many can cause performance issues.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-start">
+                            <i class="fas fa-check-circle text-green-500 mt-1 mr-2"></i>
+                            <div>
+                                <span class="font-semibold">Cache Hit Ratio (25 points):</span>
+                                <p class="text-xs text-gray-600">Percentage of data read from memory vs disk. Higher is better! Above 90% is excellent, below 80% indicates you may need more RAM.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-start">
+                            <i class="fas fa-check-circle text-green-500 mt-1 mr-2"></i>
+                            <div>
+                                <span class="font-semibold">Transaction Rate (20 points):</span>
+                                <p class="text-xs text-gray-600">Number of commits vs rollbacks per second. High commit rate with low rollbacks indicates healthy operations.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-start">
+                            <i class="fas fa-check-circle text-green-500 mt-1 mr-2"></i>
+                            <div>
+                                <span class="font-semibold">Index Usage (20 points):</span>
+                                <p class="text-xs text-gray-600">How often queries use indexes vs sequential scans. Index scans are faster! More than 70% index usage is good.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-start">
+                            <i class="fas fa-check-circle text-green-500 mt-1 mr-2"></i>
+                            <div>
+                                <span class="font-semibold">Table Bloat (15 points):</span>
+                                <p class="text-xs text-gray-600">Wasted space in tables from dead tuples. Less than 20% bloat is healthy. Run VACUUM regularly to reclaim space.</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3 pt-3 border-t border-gray-200">
+                        <p class="text-xs text-gray-500">
+                            <i class="fas fa-lightbulb text-yellow-500 mr-1"></i>
+                            <strong>Score Range:</strong> 
+                            <span class="text-green-600">90-100 (Excellent)</span>, 
+                            <span class="text-yellow-600">70-89 (Good)</span>, 
+                            <span class="text-orange-600">50-69 (Fair)</span>, 
+                            <span class="text-red-600">Below 50 (Needs Attention)</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Summary Cards -->
@@ -1670,6 +1737,19 @@ function showQueryAnalyzer() {
           '✅ Execution plan visualization\n' +
           '✅ Cost estimation\n\n' +
           'For now: Use EXPLAIN (ANALYZE, BUFFERS) in psql');
+}
+
+function toggleHealthExplanation() {
+    const explanation = document.getElementById('healthExplanation');
+    const icon = document.getElementById('explanationIcon');
+    
+    if (explanation.classList.contains('hidden')) {
+        explanation.classList.remove('hidden');
+        icon.classList.add('rotate-180');
+    } else {
+        explanation.classList.add('hidden');
+        icon.classList.remove('rotate-180');
+    }
 }
 </script>
 {% endblock %}

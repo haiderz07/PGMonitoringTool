@@ -928,6 +928,83 @@ def activity_log():
     conn.close()
     
     return jsonify({
+
+# USER PROFILE ROUTE
+@app.route('/profile', methods=['GET', 'POST'])
+@login_required
+def user_profile():
+    """User profile page - view and update account information"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    if request.method == 'POST':
+        # Handle profile updates
+        email = request.form.get('email')
+        current_password = request.form.get('current_password')
+        new_password = request.form.get('new_password')
+        
+        # Update email if provided
+        if email and email != current_user.email:
+            cursor.execute("UPDATE users SET email = ? WHERE id = ?", (email, current_user.id))
+            conn.commit()
+            flash('Email updated successfully!', 'success')
+            log_activity(current_user.id, 'profile_update', f'Email updated to {email}')
+        
+        # Update password if provided
+        if current_password and new_password:
+            # Verify current password
+            cursor.execute("SELECT password_hash FROM users WHERE id = ?", (current_user.id,))
+            stored_hash = cursor.fetchone()[0]
+            
+            if check_password_hash(stored_hash, current_password):
+                new_hash = generate_password_hash(new_password)
+                cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, current_user.id))
+                conn.commit()
+                flash('Password updated successfully!', 'success')
+                log_activity(current_user.id, 'password_change', 'Password changed')
+            else:
+                flash('Current password is incorrect', 'error')
+        
+        conn.close()
+        return redirect(url_for('user_profile'))
+    
+    # GET request - fetch user data
+    cursor.execute("""
+        SELECT username, email, subscription_tier, monthly_payment, max_connections, 
+               created_at, stripe_customer_id, subscription_status
+        FROM users 
+        WHERE id = ?
+    """, (current_user.id,))
+    
+    user_data = cursor.fetchone()
+    
+    # Get connection count
+    cursor.execute("SELECT COUNT(*) FROM connections WHERE user_id = ?", (current_user.id,))
+    connection_count = cursor.fetchone()[0]
+    
+    # Get recent activity
+    cursor.execute("""
+        SELECT activity_type, description, created_at
+        FROM activity_log
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 10
+    """, (current_user.id,))
+    
+    recent_activity = cursor.fetchall()
+    conn.close()
+    
+    return render_template('profile.html',
+                         username=user_data[0],
+                         email=user_data[1],
+                         subscription_tier=user_data[2],
+                         monthly_payment=user_data[3],
+                         max_connections=user_data[4],
+                         created_at=user_data[5],
+                         customer_id=user_data[6],
+                         subscription_status=user_data[7],
+                         connection_count=connection_count,
+                         recent_activity=recent_activity)
         'activities': [
             {
                 'type': row[0],
