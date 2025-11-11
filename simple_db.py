@@ -10,6 +10,39 @@ import psycopg2
 from psycopg2.extras import DictCursor
 
 
+class PostgreSQLCursorWrapper:
+    """Wrapper to make PostgreSQL cursor accept SQLite-style ? placeholders"""
+    
+    def __init__(self, cursor):
+        self._cursor = cursor
+    
+    def execute(self, query, params=None):
+        """Convert ? to %s for PostgreSQL compatibility"""
+        if params:
+            query = query.replace('?', '%s')
+        return self._cursor.execute(query, params)
+    
+    def fetchone(self):
+        return self._cursor.fetchone()
+    
+    def fetchall(self):
+        return self._cursor.fetchall()
+    
+    def fetchmany(self, size=None):
+        return self._cursor.fetchmany(size) if size else self._cursor.fetchmany()
+    
+    def close(self):
+        return self._cursor.close()
+    
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+    
+    @property
+    def description(self):
+        return self._cursor.description
+
+
 class DatabaseConnection:
     """Simple wrapper that makes PostgreSQL behave like SQLite"""
     
@@ -31,7 +64,8 @@ class DatabaseConnection:
     def cursor(self):
         """Return cursor that works for both databases"""
         if self.db_type == 'postgresql':
-            return self.conn.cursor(cursor_factory=DictCursor)
+            pg_cursor = self.conn.cursor(cursor_factory=DictCursor)
+            return PostgreSQLCursorWrapper(pg_cursor)
         else:
             return self.conn.cursor()
     
