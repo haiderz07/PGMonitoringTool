@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 import sqlite3
 from pg_monitor_enhanced import PGMonitorEnhanced
+from simple_db import get_db, init_database
 
 app = Flask(__name__)
 # Use environment variable for secret key in production, fallback to random for development
@@ -346,69 +347,13 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# User database (SQLite)
-USER_DB = 'web_users.db'
-
-def init_user_db():
-    """Initialize user database with subscription support"""
-    conn = sqlite3.connect(USER_DB)
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            email TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            subscription_tier TEXT DEFAULT 'free',
-            monthly_payment REAL DEFAULT 0.0,
-            stripe_customer_id TEXT,
-            stripe_subscription_id TEXT,
-            subscription_status TEXT DEFAULT 'active',
-            max_connections INTEGER DEFAULT 2,
-            last_payment_date DATETIME
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS connections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            host TEXT NOT NULL,
-            port INTEGER NOT NULL,
-            database TEXT NOT NULL,
-            username TEXT NOT NULL,
-            password TEXT NOT NULL,
-            is_default BOOLEAN DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS activity_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            activity_type TEXT NOT NULL,
-            description TEXT,
-            ip_address TEXT,
-            user_agent TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
-
-init_user_db()
+# Initialize database (auto-detects PostgreSQL vs SQLite)
+init_database()
 
 # Helper function to log activity
 def log_activity(user_id, activity_type, description):
     """Log user activity for tracking"""
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     ip_address = request.remote_addr if request else 'N/A'
     user_agent = request.headers.get('User-Agent', 'N/A') if request else 'N/A'
@@ -435,7 +380,7 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, username, email, subscription_tier, monthly_payment, max_connections 
@@ -465,7 +410,7 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
         
-        conn = sqlite3.connect(USER_DB)
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT id, username, password_hash, email FROM users WHERE username = ?", (username,))
         user_data = cursor.fetchone()
@@ -502,7 +447,7 @@ def register():
             flash('❌ Password must be at least 6 characters', 'error')
             return render_template('register.html')
         
-        conn = sqlite3.connect(USER_DB)
+        conn = get_db()
         cursor = conn.cursor()
         
         # Check if user exists
@@ -543,7 +488,7 @@ def logout():
 def dashboard():
     """Main dashboard"""
     # Check if user has any connections
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM connections WHERE user_id = ?", (current_user.id,))
     connection_count = cursor.fetchone()[0]
@@ -619,7 +564,7 @@ def save_connection():
     data = request.json
     
     try:
-        conn = sqlite3.connect(USER_DB)
+        conn = get_db()
         cursor = conn.cursor()
         
         # Check current connection count
@@ -676,7 +621,7 @@ def save_connection():
 @login_required
 def get_connections():
     """Get user's connections"""
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, name, host, port, database, username, is_default, created_at
@@ -706,7 +651,7 @@ def get_connections():
 def get_metrics(connection_id):
     """Get PostgreSQL metrics - optimized but COMPLETE like CLI"""
     # Get connection details
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT host, port, database, username, password
@@ -765,7 +710,7 @@ def get_metrics(connection_id):
 @login_required
 def get_metrics_fast(connection_id):
     """Get only fast metrics for quick overview"""
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT host, port, database, username, password
@@ -814,7 +759,7 @@ def get_metrics_fast(connection_id):
 @login_required
 def delete_connection(connection_id):
     """Delete a connection"""
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM connections WHERE id = ? AND user_id = ?", (connection_id, current_user.id))
     conn.commit()
@@ -826,7 +771,7 @@ def delete_connection(connection_id):
 @login_required
 def debug_connections():
     """Debug: Show all connections for current user"""
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM connections WHERE user_id = ?", (current_user.id,))
     rows = cursor.fetchall()
@@ -859,7 +804,7 @@ def test_page():
 @login_required
 def pricing():
     """Pricing page - Pay What You Want model"""
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT COUNT(*) FROM connections WHERE user_id = ?
@@ -900,7 +845,7 @@ def upgrade_subscription():
         })
     else:
         # Development mode - simulate upgrade
-        conn = sqlite3.connect(USER_DB)
+        conn = get_db()
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE users 
@@ -927,7 +872,7 @@ def upgrade_subscription():
 @login_required
 def user_stats():
     """Get user subscription stats"""
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     
     cursor.execute("""
@@ -956,7 +901,7 @@ def user_stats():
 @login_required
 def activity_log():
     """View activity log (admin only for now)"""
-    conn = sqlite3.connect(USER_DB)
+    conn = get_db()
     cursor = conn.cursor()
     
     # Get recent activity for current user
