@@ -16,11 +16,22 @@ from functools import wraps
 import sqlite3
 from pg_monitor_enhanced import PGMonitorEnhanced
 from simple_db import get_db, init_database
+import stripe
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 # Use environment variable for secret key in production, fallback to random for development
 app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(24)
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+
+# Stripe Configuration
+stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
+STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY')
+STRIPE_PRICE_ID = os.environ.get('STRIPE_PRICE_ID')
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
 
 # ============================================================================
 # SECURITY: Data Sanitization Functions (DBA + Security Best Practices)
