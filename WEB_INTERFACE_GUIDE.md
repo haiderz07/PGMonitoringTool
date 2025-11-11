@@ -92,17 +92,17 @@ The wizard shows you SQL commands to create a monitoring user on your PostgreSQL
 
 ```sql
 -- Connect to your PostgreSQL as superuser (e.g., postgres)
-CREATE USER pg_monitor_user WITH PASSWORD 'your_secure_password';
+CREATE USER monitor_user_cli WITH PASSWORD 'your_secure_password';
 
 -- Grant basic permissions
-GRANT CONNECT ON DATABASE your_database_name TO pg_monitor_user;
-GRANT USAGE ON SCHEMA public TO pg_monitor_user;
+GRANT CONNECT ON DATABASE your_database_name TO monitor_user_cli;
+GRANT USAGE ON SCHEMA public TO monitor_user_cli;
 
 -- Grant SELECT on all tables (for reading statistics)
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO pg_monitor_user;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO monitor_user_cli;
 
 -- Grant pg_monitor role (for system views)
-GRANT pg_monitor TO pg_monitor_user;
+GRANT pg_monitor TO monitor_user_cli;
 ```
 
 **💡 Click the "Copy SQL" button** to copy these commands to clipboard, then run them in your PostgreSQL database.
@@ -115,7 +115,7 @@ Fill in the form:
 - **Host**: e.g., `localhost` or `192.168.1.100`
 - **Port**: Default is `5432`
 - **Database**: The database name to monitor
-- **Username**: `pg_monitor_user` (from Step 1)
+- **Username**: `monitor_user_cli` (from Step 1)
 - **Password**: The password you set in Step 1
 
 #### **Wizard Step 3: Test & Save**
@@ -219,7 +219,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)  # Change to 12 h
 
 ### "Permission Denied" Error
 
-**Problem**: `pg_monitor_user` doesn't have required permissions
+**Problem**: `monitor_user_cli` doesn't have required permissions
 
 **Solution**: Run the GRANT commands from Setup Wizard Step 1 again
 

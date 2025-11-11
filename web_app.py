@@ -513,6 +513,19 @@ def dashboard():
 @login_required
 def setup_wizard():
     """Guided setup wizard"""
+    # Check if free tier user has reached connection limit
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM connections WHERE user_id = ?", (current_user.id,))
+    connection_count = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+    
+    # If free tier and at limit, show upgrade page
+    if current_user.subscription_tier == 'free' and connection_count >= current_user.max_connections:
+        flash(f'You have reached your connection limit ({current_user.max_connections} connections). Upgrade to add more!', 'warning')
+        return redirect(url_for('pricing'))
+    
     return render_template('setup_wizard.html')
 
 @app.route('/api/test-connection', methods=['POST'])
@@ -831,7 +844,7 @@ def pricing():
 @app.route('/api/upgrade-subscription', methods=['POST'])
 @login_required
 def upgrade_subscription():
-    """Handle subscription upgrade"""
+    """Handle subscription upgrade with Stripe"""
     data = request.json
     amount = float(data.get('amount', 0))
     
@@ -842,18 +855,10 @@ def upgrade_subscription():
             'message': '⚠️ Minimum payment is $5/month'
         }), 400
     
-    # In production, integrate with Stripe here
+    # Check if Stripe is configured
     stripe_api_key = os.environ.get('STRIPE_SECRET_KEY')
     
-    if stripe_api_key:
-        # Stripe integration (placeholder for now)
-        # TODO: Create Stripe checkout session
-        return jsonify({
-            'success': True,
-            'redirect_to_stripe': True,
-            'message': 'Redirecting to payment...'
-        })
-    else:
+    if not stripe_api_key or not STRIPE_PRICE_ID:
         # Development mode - simulate upgrade
         conn = get_db()
         cursor = conn.cursor()
@@ -869,14 +874,99 @@ def upgrade_subscription():
         conn.commit()
         conn.close()
         
-        # Log activity
-        log_activity(current_user.id, 'UPGRADE', f'Upgraded to paid tier: ${amount}/month')
+        log_activity(current_user.id, 'UPGRADE', f'Upgraded to paid tier: ${amount}/month (dev mode)')
         
         return jsonify({
             'success': True,
             'message': f'✅ Upgraded successfully! Now paying ${amount}/month with unlimited connections.',
             'redirect': url_for('dashboard')
         })
+    
+    try:
+        # Production mode - Create Stripe Checkout Session
+        checkout_session = stripe.checkout.Session.create(
+            customer_email=current_user.email,
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'unit_amount': int(amount * 100),  # Amount in cents
+                    'product_data': {
+                        'name': 'PG-Monitor Pro Subscription',
+                        'description': f'Unlimited database connections - ${amount}/month',
+                    },
+                    'recurring': {
+                        'interval': 'month',
+                    },
+                },
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=url_for('payment_success', _external=True) + '?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=url_for('pricing', _external=True),
+            metadata={
+                'user_id': current_user.id,
+                'monthly_amount': amount
+            }
+        )
+        
+        log_activity(current_user.id, 'CHECKOUT_INITIATED', f'Stripe checkout initiated for ${amount}/month')
+        
+        return jsonify({
+            'success': True,
+            'checkout_url': checkout_session.url
+        })
+        
+    except Exception as e:
+        log_activity(current_user.id, 'CHECKOUT_ERROR', f'Stripe error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': f'⚠️ Payment setup error: {str(e)}'
+        }), 500
+
+@app.route('/payment-success')
+@login_required
+def payment_success():
+    """Handle successful payment"""
+    session_id = request.args.get('session_id')
+    
+    if session_id:
+        try:
+            # Retrieve the session to verify payment
+            session = stripe.checkout.Session.retrieve(session_id)
+            
+            if session.payment_status == 'paid':
+                # Update user subscription
+                conn = get_db()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE users 
+                    SET subscription_tier = 'paid',
+                        monthly_payment = ?,
+                        max_connections = 999,
+                        subscription_status = 'active',
+                        stripe_customer_id = ?,
+                        stripe_subscription_id = ?,
+                        last_payment_date = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (
+                    float(session.metadata.get('monthly_amount', 0)),
+                    session.customer,
+                    session.subscription,
+                    current_user.id
+                ))
+                conn.commit()
+                conn.close()
+                
+                log_activity(current_user.id, 'UPGRADE_SUCCESS', f'Successfully upgraded via Stripe')
+                flash('🎉 Payment successful! Welcome to PG-Monitor Pro!', 'success')
+            else:
+                flash('⚠️ Payment verification pending...', 'warning')
+                
+        except Exception as e:
+            flash(f'⚠️ Error verifying payment: {str(e)}', 'error')
+    
+    return redirect(url_for('dashboard'))
 
 @app.route('/api/user-stats')
 @login_required
