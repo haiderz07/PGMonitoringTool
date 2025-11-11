@@ -77,7 +77,7 @@
                                 <i class="fas fa-copy"></i>
                             </button>
                         </div>
-                        <pre id="cmd1" class="text-white font-mono text-sm overflow-x-auto">CREATE USER pg_monitor_user WITH PASSWORD 'your_secure_password_here';</pre>
+                        <pre id="cmd1" class="text-white font-mono text-sm overflow-x-auto">CREATE USER monitor_user_cli WITH PASSWORD 'your_secure_password_here';</pre>
                         <p class="text-gray-400 text-xs mt-2">⚠️ Replace 'your_secure_password_here' with a strong password</p>
                     </div>
 
@@ -89,7 +89,7 @@
                                 <i class="fas fa-copy"></i>
                             </button>
                         </div>
-                        <pre id="cmd2" class="text-white font-mono text-sm overflow-x-auto">GRANT CONNECT ON DATABASE your_database_name TO pg_monitor_user;</pre>
+                        <pre id="cmd2" class="text-white font-mono text-sm overflow-x-auto">GRANT CONNECT ON DATABASE your_database_name TO monitor_user_cli;</pre>
                         <p class="text-gray-400 text-xs mt-2">⚠️ Replace 'your_database_name' with your actual database name</p>
                     </div>
 
@@ -101,7 +101,7 @@
                                 <i class="fas fa-copy"></i>
                             </button>
                         </div>
-                        <pre id="cmd3" class="text-white font-mono text-sm overflow-x-auto">GRANT USAGE ON SCHEMA public TO pg_monitor_user;</pre>
+                        <pre id="cmd3" class="text-white font-mono text-sm overflow-x-auto">GRANT USAGE ON SCHEMA public TO monitor_user_cli;</pre>
                     </div>
 
                     <!-- Command 4: Grant SELECT on Tables -->
@@ -112,8 +112,8 @@
                                 <i class="fas fa-copy"></i>
                             </button>
                         </div>
-                        <pre id="cmd4" class="text-white font-mono text-sm overflow-x-auto">GRANT SELECT ON ALL TABLES IN SCHEMA public TO pg_monitor_user;
-GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO pg_monitor_user;</pre>
+                        <pre id="cmd4" class="text-white font-mono text-sm overflow-x-auto">GRANT SELECT ON ALL TABLES IN SCHEMA public TO monitor_user_cli;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO monitor_user_cli;</pre>
                     </div>
 
                     <!-- Command 5: Grant System View Access -->
@@ -125,7 +125,7 @@ GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO pg_monitor_user;</pre>
                             </button>
                         </div>
                         <pre id="cmd5" class="text-white font-mono text-sm overflow-x-auto">-- PostgreSQL 10+: Use built-in monitoring role
-GRANT pg_monitor TO pg_monitor_user;</pre>
+GRANT pg_monitor TO monitor_user_cli;</pre>
                         <p class="text-gray-400 text-xs mt-2">📌 For PostgreSQL 9.6 and earlier, use alternative commands in the dropdown below</p>
                     </div>
 
@@ -136,10 +136,10 @@ GRANT pg_monitor TO pg_monitor_user;</pre>
                         </summary>
                         <div class="mt-3 bg-gray-900 rounded p-3">
                             <pre class="text-white font-mono text-sm overflow-x-auto">-- For PostgreSQL < 10 (pg_monitor role doesn't exist)
-GRANT SELECT ON pg_stat_database TO pg_monitor_user;
-GRANT SELECT ON pg_stat_user_tables TO pg_monitor_user;
-GRANT SELECT ON pg_stat_user_indexes TO pg_monitor_user;
-GRANT SELECT ON pg_statio_user_tables TO pg_monitor_user;</pre>
+GRANT SELECT ON pg_stat_database TO monitor_user_cli;
+GRANT SELECT ON pg_stat_user_tables TO monitor_user_cli;
+GRANT SELECT ON pg_stat_user_indexes TO monitor_user_cli;
+GRANT SELECT ON pg_statio_user_tables TO monitor_user_cli;</pre>
                         </div>
                     </details>
                 </div>
@@ -201,7 +201,7 @@ GRANT SELECT ON pg_statio_user_tables TO pg_monitor_user;</pre>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Username</label>
-                        <input type="text" id="connUsername" value="pg_monitor_user"
+                        <input type="text" id="connUsername" value="monitor_user_cli"
                                class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500">
                     </div>
                     <div>
