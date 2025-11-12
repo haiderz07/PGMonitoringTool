@@ -381,27 +381,33 @@ def log_activity(user_id, activity_type, description):
     print(f"[ACTIVITY] User {user_id} | {activity_type} | {description} | IP: {ip_address}")
 
 class User(UserMixin):
-    def __init__(self, id, username, email, subscription_tier='free', monthly_payment=0.0, max_connections=2):
+    def __init__(self, id, username, email, subscription_tier='free', monthly_payment=0.0, max_connections=2, 
+                 stripe_subscription_id=None, stripe_customer_id=None, subscription_status='inactive'):
         self.id = id
         self.username = username
         self.email = email
         self.subscription_tier = subscription_tier
         self.monthly_payment = monthly_payment
         self.max_connections = max_connections
+        self.stripe_subscription_id = stripe_subscription_id
+        self.stripe_customer_id = stripe_customer_id
+        self.subscription_status = subscription_status
 
 @login_manager.user_loader
 def load_user(user_id):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, username, email, subscription_tier, monthly_payment, max_connections 
+        SELECT id, username, email, subscription_tier, monthly_payment, max_connections,
+               stripe_subscription_id, stripe_customer_id, subscription_status
         FROM users WHERE id = ?
     """, (user_id,))
     user_data = cursor.fetchone()
     conn.close()
     
     if user_data:
-        return User(user_data[0], user_data[1], user_data[2], user_data[3], user_data[4], user_data[5])
+        return User(user_data[0], user_data[1], user_data[2], user_data[3], user_data[4], user_data[5],
+                   user_data[6], user_data[7], user_data[8])
     return None
 
 @app.route('/')
@@ -852,7 +858,8 @@ def admin_dashboard():
         return redirect(url_for('dashboard'))
     
     try:
-        cursor = get_cursor()
+        conn = get_db()
+        cursor = conn.cursor()
         
         # Get stats
         cursor.execute('SELECT COUNT(*) FROM users')
@@ -861,7 +868,7 @@ def admin_dashboard():
         cursor.execute("SELECT COUNT(*) FROM users WHERE subscription_tier = 'paid'")
         paid_users = cursor.fetchone()[0]
         
-        cursor.execute('SELECT COALESCE(SUM(monthly_payment), 0) FROM users WHERE subscription_tier = %s', ('paid',))
+        cursor.execute("SELECT COALESCE(SUM(monthly_payment), 0) FROM users WHERE subscription_tier = 'paid'")
         monthly_revenue = cursor.fetchone()[0]
         
         cursor.execute('SELECT COUNT(*) FROM connections')
@@ -870,7 +877,7 @@ def admin_dashboard():
         stats = {
             'total_users': total_users,
             'paid_users': paid_users,
-            'monthly_revenue': monthly_revenue,
+            'monthly_revenue': float(monthly_revenue) if monthly_revenue else 0,
             'total_connections': total_connections
         }
         
@@ -925,14 +932,19 @@ def admin_dashboard():
                 'username': row[4]
             })
         
+        conn.close()
+        
         return render_template('admin.html',
                              stats=stats,
                              users=users,
                              activity_logs=activity_logs)
         
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         print(f"❌ Admin dashboard error: {str(e)}")
-        flash('Error loading admin dashboard', 'error')
+        print(f"Full traceback:\n{error_details}")
+        flash(f'Error loading admin dashboard: {str(e)}', 'error')
         return redirect(url_for('dashboard'))
 
 @app.route('/admin/user-details/<int:user_id>')
@@ -945,7 +957,8 @@ def admin_user_details(user_id):
         return jsonify({'error': 'Unauthorized'}), 403
     
     try:
-        cursor = get_cursor()
+        conn = get_db()
+        cursor = conn.cursor()
         
         # Get user info
         cursor.execute('''
@@ -957,6 +970,7 @@ def admin_user_details(user_id):
         
         user_row = cursor.fetchone()
         if not user_row:
+            conn.close()
             return jsonify({'error': 'User not found'}), 404
         
         user = {
@@ -1005,6 +1019,8 @@ def admin_user_details(user_id):
                 'action': row[1],
                 'details': row[2]
             })
+        
+        conn.close()
         
         return jsonify({
             'success': True,
@@ -1261,13 +1277,15 @@ def admin_reset_user(user_id):
         return jsonify({'error': 'Unauthorized'}), 403
     
     try:
-        cursor = get_cursor()
+        conn = get_db()
+        cursor = conn.cursor()
         
         # Get target user info
         cursor.execute('SELECT username, subscription_tier FROM users WHERE id = %s', (user_id,))
         user_data = cursor.fetchone()
         
         if not user_data:
+            conn.close()
             return jsonify({'error': 'User not found'}), 404
         
         username, current_tier = user_data
@@ -1284,11 +1302,15 @@ def admin_reset_user(user_id):
             WHERE id = %s
         ''', (user_id,))
         
+        conn.commit()
+        
         # Log the action
         log_activity(current_user.id, 'ADMIN_RESET_USER', 
                     f'Reset user {username} (ID: {user_id}) from {current_tier} to free tier')
         log_activity(user_id, 'ACCOUNT_RESET', 
                     f'Account reset to free tier by admin {current_user.username}')
+        
+        conn.close()
         
         print(f"✅ Admin {current_user.username} reset user {username} to free tier")
         
