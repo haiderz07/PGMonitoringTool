@@ -997,6 +997,210 @@ def user_stats():
         'connections_remaining': user_data[2] - connection_count
     })
 
+@app.route('/api/save-metrics-snapshot/<int:connection_id>', methods=['POST'])
+@login_required
+def save_metrics_snapshot(connection_id):
+    """Save metrics snapshot for historical comparison (Paid users only)"""
+    # Check if user is on paid tier
+    if current_user.subscription_tier != 'paid':
+        return jsonify({'error': 'This feature is only available for paid subscribers'}), 403
+    
+    try:
+        data = request.json
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Verify connection belongs to user
+        cursor.execute("SELECT id FROM connections WHERE id = ? AND user_id = ?", 
+                      (connection_id, current_user.id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Connection not found'}), 404
+        
+        # Save snapshot
+        cursor.execute("""
+            INSERT INTO metrics_history (
+                user_id, connection_id, db_size, connections_count, 
+                tps, cache_hit_ratio, rollback_rate, deadlocks,
+                bloat_percentage, index_usage, slow_queries_count, metrics_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            current_user.id,
+            connection_id,
+            data.get('db_size'),
+            data.get('connections'),
+            data.get('tps'),
+            data.get('cache_hit_ratio'),
+            data.get('rollback_rate'),
+            data.get('deadlocks'),
+            data.get('bloat_percentage'),
+            data.get('index_usage'),
+            data.get('slow_queries_count'),
+            json.dumps(data)  # Store full metrics as JSON
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'Snapshot saved successfully'})
+        
+    except Exception as e:
+        print(f"Error saving snapshot: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/metrics-comparison/<int:connection_id>')
+@login_required
+def metrics_comparison(connection_id):
+    """Get 30-minute comparison data (Paid users only)"""
+    if current_user.subscription_tier != 'paid':
+        return jsonify({'error': 'This feature is only available for paid subscribers'}), 403
+    
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Get snapshot from 30 minutes ago
+        cursor.execute("""
+            SELECT db_size, connections_count, tps, cache_hit_ratio, 
+                   rollback_rate, deadlocks, bloat_percentage, index_usage, 
+                   slow_queries_count, snapshot_time
+            FROM metrics_history
+            WHERE user_id = ? AND connection_id = ?
+              AND snapshot_time >= datetime('now', '-30 minutes')
+            ORDER BY snapshot_time ASC
+            LIMIT 1
+        """, (current_user.id, connection_id))
+        
+        old_snapshot = cursor.fetchone()
+        
+        # Get latest snapshot
+        cursor.execute("""
+            SELECT db_size, connections_count, tps, cache_hit_ratio, 
+                   rollback_rate, deadlocks, bloat_percentage, index_usage, 
+                   slow_queries_count, snapshot_time
+            FROM metrics_history
+            WHERE user_id = ? AND connection_id = ?
+            ORDER BY snapshot_time DESC
+            LIMIT 1
+        """, (current_user.id, connection_id))
+        
+        new_snapshot = cursor.fetchone()
+        conn.close()
+        
+        if not old_snapshot or not new_snapshot:
+            return jsonify({
+                'has_comparison': False,
+                'message': 'Not enough data for comparison. Snapshots are saved every 30 minutes.'
+            })
+        
+        # Calculate differences
+        comparison = {
+            'has_comparison': True,
+            'old_time': old_snapshot[9],
+            'new_time': new_snapshot[9],
+            'changes': {
+                'connections': {
+                    'old': old_snapshot[1],
+                    'new': new_snapshot[1],
+                    'diff': new_snapshot[1] - old_snapshot[1] if old_snapshot[1] and new_snapshot[1] else 0
+                },
+                'tps': {
+                    'old': old_snapshot[2],
+                    'new': new_snapshot[2],
+                    'diff': round(new_snapshot[2] - old_snapshot[2], 2) if old_snapshot[2] and new_snapshot[2] else 0
+                },
+                'cache_hit_ratio': {
+                    'old': old_snapshot[3],
+                    'new': new_snapshot[3],
+                    'diff': round(new_snapshot[3] - old_snapshot[3], 2) if old_snapshot[3] and new_snapshot[3] else 0
+                },
+                'bloat_percentage': {
+                    'old': old_snapshot[6],
+                    'new': new_snapshot[6],
+                    'diff': round(new_snapshot[6] - old_snapshot[6], 2) if old_snapshot[6] and new_snapshot[6] else 0
+                }
+            }
+        }
+        
+        return jsonify(comparison)
+        
+    except Exception as e:
+        print(f"Error getting comparison: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/download-report/<int:connection_id>')
+@login_required
+def download_report(connection_id):
+    """Download CSV report with metrics and 30-min comparison (Paid users only)"""
+    if current_user.subscription_tier != 'paid':
+        return jsonify({'error': 'This feature is only available for paid subscribers'}), 403
+    
+    try:
+        import csv
+        from io import StringIO
+        from datetime import datetime
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Get connection details
+        cursor.execute("""
+            SELECT name, host, port, database 
+            FROM connections 
+            WHERE id = ? AND user_id = ?
+        """, (connection_id, current_user.id))
+        
+        conn_data = cursor.fetchone()
+        if not conn_data:
+            return jsonify({'error': 'Connection not found'}), 404
+        
+        # Get last 10 snapshots
+        cursor.execute("""
+            SELECT snapshot_time, db_size, connections_count, tps, cache_hit_ratio,
+                   rollback_rate, deadlocks, bloat_percentage, index_usage, slow_queries_count
+            FROM metrics_history
+            WHERE user_id = ? AND connection_id = ?
+            ORDER BY snapshot_time DESC
+            LIMIT 10
+        """, (current_user.id, connection_id))
+        
+        snapshots = cursor.fetchall()
+        conn.close()
+        
+        # Create CSV
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Header
+        writer.writerow(['PG-Monitor Performance Report'])
+        writer.writerow([f'Connection: {conn_data[0]}'])
+        writer.writerow([f'Host: {conn_data[1]}:{conn_data[2]}'])
+        writer.writerow([f'Database: {conn_data[3]}'])
+        writer.writerow([f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'])
+        writer.writerow([])
+        
+        # Data headers
+        writer.writerow([
+            'Timestamp', 'DB Size', 'Connections', 'TPS', 'Cache Hit %',
+            'Rollback Rate', 'Deadlocks', 'Bloat %', 'Index Usage %', 'Slow Queries'
+        ])
+        
+        # Data rows
+        for snap in snapshots:
+            writer.writerow(snap)
+        
+        # Create response
+        output.seek(0)
+        filename = f'pg_monitor_report_{conn_data[0]}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        
+        return output.getvalue(), 200, {
+            'Content-Type': 'text/csv',
+            'Content-Disposition': f'attachment; filename={filename}'
+        }
+        
+    except Exception as e:
+        print(f"Error generating report: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/activity-log')
 @login_required
 def activity_log():

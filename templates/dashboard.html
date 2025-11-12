@@ -79,6 +79,26 @@
                     <i class="fas fa-sync mr-2"></i>Refresh
                 </button>
             </div>
+            
+            <!-- Auto-Refresh Settings -->
+            <div class="mt-4 flex items-center justify-end space-x-3">
+                <label for="refreshInterval" class="text-sm text-gray-600">
+                    <i class="fas fa-clock mr-1"></i>Auto-Refresh:
+                </label>
+                <select id="refreshInterval" class="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 text-sm" onchange="updateRefreshInterval()">
+                    <option value="0">Off</option>
+                    <option value="10">Every 10 seconds</option>
+                    <option value="30" selected>Every 30 seconds</option>
+                    <option value="60">Every 1 minute</option>
+                    <option value="300">Every 5 minutes</option>
+                </select>
+                
+                {% if current_user.subscription_tier == 'paid' %}
+                <button type="button" onclick="downloadReport()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm ml-2" title="Download CSV Report">
+                    <i class="fas fa-download mr-2"></i>Download Report
+                </button>
+                {% endif %}
+            </div>
         </div>
     </div>
 
@@ -240,6 +260,128 @@
             </div>
         </div>
 
+        <!-- Tabs for Organizing Metrics -->
+        <div class="bg-white rounded-lg shadow mb-8">
+            <!-- Tab Navigation -->
+            <div class="border-b border-gray-200">
+                <nav class="flex -mb-px">
+                    <button onclick="switchTab('overview')" id="tab-overview" class="tab-button active px-6 py-4 font-medium text-sm border-b-2 border-purple-600 text-purple-600 transition-colors">
+                        <i class="fas fa-chart-line mr-2"></i>Overview & Performance
+                    </button>
+                    <button onclick="switchTab('recommendations')" id="tab-recommendations" class="tab-button px-6 py-4 font-medium text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors">
+                        <i class="fas fa-cogs mr-2"></i>Recommendations
+                    </button>
+                    <button onclick="switchTab('indexes')" id="tab-indexes" class="tab-button px-6 py-4 font-medium text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors">
+                        <i class="fas fa-database mr-2"></i>Indexes
+                    </button>
+                    <button onclick="switchTab('bloat')" id="tab-bloat" class="tab-button px-6 py-4 font-medium text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors">
+                        <i class="fas fa-hdd mr-2"></i>Table Bloat
+                    </button>
+                    <button onclick="switchTab('cpu')" id="tab-cpu" class="tab-button px-6 py-4 font-medium text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors">
+                        <i class="fas fa-microchip mr-2"></i>CPU & Queries
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="p-6">
+                <!-- Overview Tab -->
+                <div id="content-overview" class="tab-content">
+                    <!-- Transaction Performance -->
+                    <div class="bg-gray-50 rounded-lg p-6 mb-6">
+                        <h3 class="text-lg font-semibold mb-4">
+                            <i class="fas fa-exchange-alt text-green-600 mr-2"></i>Transaction Performance
+                        </h3>
+                        <div id="transactionMetrics" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <p class="text-sm text-gray-600">TPS (Transactions/Second)</p>
+                                <p id="tpsDetail" class="text-2xl font-bold text-green-600">--</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Rollback Rate</p>
+                                <p id="rollbackRate" class="text-2xl font-bold">--</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Deadlocks</p>
+                                <p id="deadlocks" class="text-2xl font-bold">--</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Table Statistics Health -->
+                    <div class="bg-gray-50 rounded-lg p-6 mb-6">
+                        <h3 class="text-lg font-semibold mb-4">
+                            <i class="fas fa-chart-line text-blue-600 mr-2"></i>Table Statistics Health
+                        </h3>
+                        <div id="statsHealth"></div>
+                    </div>
+
+                    <!-- System Metrics -->
+                    <div class="bg-gray-50 rounded-lg p-6">
+                        <h3 class="text-lg font-semibold mb-4">
+                            <i class="fas fa-tachometer-alt text-orange-600 mr-2"></i>System Metrics
+                        </h3>
+                        <div id="systemMetrics"></div>
+                    </div>
+                </div>
+
+                <!-- Recommendations Tab -->
+                <div id="content-recommendations" class="tab-content hidden">
+                    <!-- SKU-Based Performance Recommendations -->
+                    <div id="skuRecommendations-tab">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-cogs text-purple-600 text-xl mr-3"></i>
+                            <h3 class="text-lg font-semibold">Server Configuration & DBA Recommendations</h3>
+                            <span id="skuBadge-tab" class="ml-3 text-xs bg-blue-100 text-blue-800 px-3 py-1 rounded-full"></span>
+                        </div>
+                        <div id="skuDetails-tab" class="mt-4">
+                            <p class="text-gray-500 text-center py-8">Select a connection to view recommendations</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Indexes Tab -->
+                <div id="content-indexes" class="tab-content hidden">
+                    <!-- Index Health Analysis -->
+                    <div id="indexAnalysis-tab">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-database text-indigo-600 text-xl mr-3"></i>
+                            <h3 class="text-lg font-semibold">Index Health & Optimization Opportunities</h3>
+                        </div>
+                        <div id="indexDetails-tab" class="mt-4">
+                            <p class="text-gray-500 text-center py-8">Select a connection to view index analysis</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Table Bloat Tab -->
+                <div id="content-bloat" class="tab-content hidden">
+                    <div class="bg-gray-50 rounded-lg p-6">
+                        <h3 class="text-lg font-semibold mb-4">
+                            <i class="fas fa-hdd text-red-600 mr-2"></i>Table Bloat Analysis
+                        </h3>
+                        <div id="bloatChart-tab" class="overflow-x-auto">
+                            <p class="text-gray-500 text-center py-8">Select a connection to view bloat data</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CPU & Queries Tab -->
+                <div id="content-cpu" class="tab-content hidden">
+                    <div class="bg-gray-50 rounded-lg p-6">
+                        <h3 class="text-lg font-semibold mb-4">
+                            <i class="fas fa-chart-bar text-purple-600 mr-2"></i>Top Slow Queries (CPU Hogs)
+                        </h3>
+                        <div id="slowQueriesChart-tab" class="overflow-x-auto">
+                            <p class="text-gray-500 text-center py-8">Select a connection to view slow queries</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Legacy sections hidden but kept for compatibility -->
+        <div class="hidden">
         <!-- Main Charts -->
         <!-- Top Slow Queries (Full Width) -->
         <div class="bg-white rounded-lg shadow p-6 mb-8">
@@ -262,40 +404,40 @@
         </div>
 
         <!-- Transaction Performance -->
-        <div class="bg-white rounded-lg shadow p-6 mb-8">
+        <div class="bg-white rounded-lg shadow p-6 mb-8 hidden">
             <h3 class="text-lg font-semibold mb-4">
                 <i class="fas fa-exchange-alt text-green-600 mr-2"></i>Transaction Performance
             </h3>
-            <div id="transactionMetrics" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div id="transactionMetrics-old" class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <p class="text-sm text-gray-600">TPS (Transactions/Second)</p>
-                    <p id="tpsDetail" class="text-2xl font-bold text-green-600">--</p>
+                    <p id="tpsDetail-old" class="text-2xl font-bold text-green-600">--</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-600">Rollback Rate</p>
-                    <p id="rollbackRate" class="text-2xl font-bold">--</p>
+                    <p id="rollbackRate-old" class="text-2xl font-bold">--</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-600">Deadlocks</p>
-                    <p id="deadlocks" class="text-2xl font-bold">--</p>
+                    <p id="deadlocks-old" class="text-2xl font-bold">--</p>
                 </div>
             </div>
         </div>
 
         <!-- Table Statistics Health (NEW) -->
-        <div class="bg-white rounded-lg shadow p-6 mb-8">
+        <div class="bg-white rounded-lg shadow p-6 mb-8 hidden">
             <h3 class="text-lg font-semibold mb-4">
                 <i class="fas fa-chart-line text-blue-600 mr-2"></i>Table Statistics Health
             </h3>
-            <div id="statsHealth"></div>
+            <div id="statsHealth-old"></div>
         </div>
 
         <!-- System Metrics -->
-        <div class="bg-white rounded-lg shadow p-6 mb-8">
+        <div class="bg-white rounded-lg shadow p-6 mb-8 hidden">
             <h3 class="text-lg font-semibold mb-4">
                 <i class="fas fa-tachometer-alt text-orange-600 mr-2"></i>System Metrics
             </h3>
-            <div id="systemMetrics"></div>
+            <div id="systemMetrics-old"></div>
         </div>
         
         <!-- Index Health Analysis -->
@@ -316,16 +458,40 @@
             </h3>
             <div id="skuDetails"></div>
         </div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Dashboard Version v2.1 - Number conversion fix for all metrics
-console.log('🚀 Dashboard v2.1 loaded - String to number conversion applied');
+// Dashboard Version v2.2 - Added tab navigation for organized metrics
+console.log('🚀 Dashboard v2.2 loaded - Tab navigation enabled');
 
 let selectedConnectionId = null;
+
+// Tab switching function
+function switchTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.add('hidden');
+    });
+    
+    // Remove active state from all buttons
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active', 'border-purple-600', 'text-purple-600');
+        btn.classList.add('border-transparent', 'text-gray-500');
+    });
+    
+    // Show selected tab
+    document.getElementById('content-' + tabName).classList.remove('hidden');
+    
+    // Set active button
+    const activeBtn = document.getElementById('tab-' + tabName);
+    activeBtn.classList.add('active', 'border-purple-600', 'text-purple-600');
+    activeBtn.classList.remove('border-transparent', 'text-gray-500');
+}
+
 let metricsRefreshInterval = null;
 
 // Load connections on page load
@@ -333,18 +499,42 @@ $(document).ready(function() {
     console.log('Dashboard ready, loading connections...');
     loadConnections();
     
+    // Load saved refresh interval from localStorage
+    const savedInterval = localStorage.getItem('refreshInterval');
+    if (savedInterval) {
+        $('#refreshInterval').val(savedInterval);
+    }
+    
     $('#connectionSelector').change(function() {
         selectedConnectionId = $(this).val();
         if (selectedConnectionId) {
             loadMetrics();
-            // Auto-refresh every 30 seconds
-            if (metricsRefreshInterval) {
-                clearInterval(metricsRefreshInterval);
-            }
-            metricsRefreshInterval = setInterval(loadMetrics, 30000);
+            // Setup auto-refresh based on user preference
+            updateRefreshInterval();
         }
     });
 });
+
+function updateRefreshInterval() {
+    const interval = parseInt($('#refreshInterval').val());
+    
+    // Clear existing interval
+    if (metricsRefreshInterval) {
+        clearInterval(metricsRefreshInterval);
+        metricsRefreshInterval = null;
+    }
+    
+    // Save preference to localStorage
+    localStorage.setItem('refreshInterval', interval);
+    
+    // Set new interval if not 0 (Off)
+    if (interval > 0 && selectedConnectionId) {
+        metricsRefreshInterval = setInterval(loadMetrics, interval * 1000);
+        console.log(`Auto-refresh set to ${interval} seconds`);
+    } else {
+        console.log('Auto-refresh disabled');
+    }
+}
 
 function loadConnections() {
     console.log('Loading connections...');
@@ -489,6 +679,20 @@ function loadMetrics() {
 }
 
 function updateAllMetrics(data) {
+    // Store current metrics for snapshot feature
+    currentMetricsData = {
+        db_size: data.metadata?.db_size || '0',
+        connections: data.metadata?.active_connections || 0,
+        tps: parseFloat(data.transaction_perf?.tps_data?.tps) || 0,
+        cache_hit_ratio: parseFloat(data.transaction_perf?.database_stats?.cache_hit_ratio) || 0,
+        rollback_rate: parseFloat(data.transaction_perf?.tps_data?.rollback_rate) || 0,
+        deadlocks: parseInt(data.transaction_perf?.tps_data?.deadlocks) || 0,
+        avg_bloat_percentage: data.table_bloat?.length > 0 ? 
+            data.table_bloat.reduce((sum, t) => sum + parseFloat(t.bloat_percentage || 0), 0) / data.table_bloat.length : 0,
+        index_scan_percentage: data.index_usage?.overall?.index_scan_percentage || 0,
+        slow_query_count: data.query_latency?.length || 0
+    };
+    
     // Update summary cards (in case they changed)
         $('#dbSize').text(data.metadata?.db_size || '--');
         $('#connections').text(`${data.metadata?.active_connections || 0} / ${data.connections?.pool_status?.[0]?.max_conn || '?'}`);
@@ -853,6 +1057,7 @@ SHOW shared_preload_libraries;</pre>
     
     html += '</div>'; // Close space-y-3
     $('#slowQueriesChart').html(html);
+    $('#slowQueriesChart-tab').html(html); // Update tab version
 }
 
 function toggleQueryDetails(index) {
@@ -927,7 +1132,9 @@ function copyQueryToClipboard(index, event) {
 
 function renderBloat(bloat) {
     if (!bloat || bloat.length === 0) {
-        $('#bloatChart').html('<p class="text-green-600 text-center py-4">✅ No significant table bloat!</p>');
+        const noBloatMsg = '<p class="text-green-600 text-center py-4">✅ No significant table bloat!</p>';
+        $('#bloatChart').html(noBloatMsg);
+        $('#bloatChart-tab').html(noBloatMsg);
         return;
     }
     
@@ -956,6 +1163,7 @@ function renderBloat(bloat) {
     html += '</tbody></table>';
     
     $('#bloatChart').html(html);
+    $('#bloatChart-tab').html(html); // Update tab version
 }
 
 function renderStatsHealth(statsHealth) {
@@ -1532,6 +1740,7 @@ function renderIndexAnalysis(indexData) {
     }
     
     $('#indexDetails').html(html);
+    $('#indexDetails-tab').html(html); // Update tab version
 }
 
 // Helper function to show toast notifications
@@ -1747,6 +1956,8 @@ function renderSKURecommendations(skuData) {
     }
     
     $('#skuDetails').html(html);
+    $('#skuDetails-tab').html(html); // Update tab version
+    $('#skuBadge-tab').text($('#skuBadge').text()); // Copy badge text
 }
 
 function showExportOptions() {
@@ -1826,5 +2037,94 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
+
+// Save metrics snapshot every 30 minutes for paid users
+let snapshotInterval = null;
+let currentMetricsData = null;
+
+function saveMetricsSnapshot() {
+    if (!selectedConnectionId || !currentMetricsData) {
+        console.log('No connection or metrics data to save snapshot');
+        return;
+    }
+    
+    // Prepare snapshot data
+    const snapshotData = {
+        db_size: currentMetricsData.db_size,
+        connections: currentMetricsData.connections,
+        tps: currentMetricsData.tps,
+        cache_hit_ratio: currentMetricsData.cache_hit_ratio,
+        rollback_rate: currentMetricsData.rollback_rate || 0,
+        deadlocks: currentMetricsData.deadlocks || 0,
+        bloat_percentage: currentMetricsData.avg_bloat_percentage || 0,
+        index_usage: currentMetricsData.index_scan_percentage || 0,
+        slow_queries_count: currentMetricsData.slow_query_count || 0
+    };
+    
+    $.ajax({
+        url: `/api/save-metrics-snapshot/${selectedConnectionId}`,
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(snapshotData),
+        success: function(response) {
+            console.log('✅ Metrics snapshot saved:', response);
+        },
+        error: function(xhr) {
+            if (xhr.status === 403) {
+                console.log('Snapshot feature only available for paid users');
+            } else {
+                console.error('Error saving snapshot:', xhr.responseJSON);
+            }
+        }
+    });
+}
+
+// Start auto-snapshot for paid users (every 30 minutes)
+{% if current_user.subscription_tier == 'paid' %}
+function startAutoSnapshot() {
+    if (snapshotInterval) {
+        clearInterval(snapshotInterval);
+    }
+    
+    // Save first snapshot immediately
+    setTimeout(saveMetricsSnapshot, 5000); // Wait 5 seconds after metrics load
+    
+    // Then save every 30 minutes
+    snapshotInterval = setInterval(saveMetricsSnapshot, 30 * 60 * 1000);
+    console.log('📸 Auto-snapshot enabled (every 30 minutes)');
+}
+
+// Start auto-snapshot when connection is selected
+$(document).ready(function() {
+    $('#connectionSelector').on('change', function() {
+        if (selectedConnectionId) {
+            startAutoSnapshot();
+        }
+    });
+});
+{% endif %}
+
+// Download CSV report function
+function downloadReport() {
+    if (!selectedConnectionId) {
+        alert('Please select a connection first');
+        return;
+    }
+    
+    // Show loading state
+    const btn = event.target.closest('button');
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
+    btn.disabled = true;
+    
+    // Download CSV
+    window.location.href = `/api/download-report/${selectedConnectionId}`;
+    
+    // Reset button after delay
+    setTimeout(() => {
+        btn.innerHTML = originalHTML;
+        btn.disabled = false;
+    }, 2000);
+}
 </script>
 {% endblock %}
