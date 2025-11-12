@@ -841,6 +841,182 @@ def pricing():
                          monthly_payment=current_user.monthly_payment,
                          max_connections=current_user.max_connections)
 
+@app.route('/admin')
+@login_required
+def admin_dashboard():
+    """Admin dashboard - only accessible to admin users"""
+    
+    # Admin check
+    if current_user.username != 'haider':  # Change to your admin username
+        flash('Unauthorized access', 'error')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        cursor = get_cursor()
+        
+        # Get stats
+        cursor.execute('SELECT COUNT(*) FROM users')
+        total_users = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM users WHERE subscription_tier = 'paid'")
+        paid_users = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COALESCE(SUM(monthly_payment), 0) FROM users WHERE subscription_tier = %s', ('paid',))
+        monthly_revenue = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM connections')
+        total_connections = cursor.fetchone()[0]
+        
+        stats = {
+            'total_users': total_users,
+            'paid_users': paid_users,
+            'monthly_revenue': monthly_revenue,
+            'total_connections': total_connections
+        }
+        
+        # Get all users with connection counts
+        cursor.execute('''
+            SELECT 
+                u.id, u.username, u.email, u.subscription_tier, u.monthly_payment,
+                u.max_connections, u.stripe_subscription_id, u.stripe_customer_id,
+                u.subscription_status, u.created_at,
+                COUNT(c.id) as connection_count
+            FROM users u
+            LEFT JOIN connections c ON u.id = c.user_id
+            GROUP BY u.id, u.username, u.email, u.subscription_tier, u.monthly_payment,
+                     u.max_connections, u.stripe_subscription_id, u.stripe_customer_id,
+                     u.subscription_status, u.created_at
+            ORDER BY u.id DESC
+        ''')
+        
+        users = []
+        for row in cursor.fetchall():
+            users.append({
+                'id': row[0],
+                'username': row[1],
+                'email': row[2],
+                'subscription_tier': row[3],
+                'monthly_payment': row[4],
+                'max_connections': row[5],
+                'stripe_subscription_id': row[6],
+                'stripe_customer_id': row[7],
+                'subscription_status': row[8],
+                'created_at': row[9],
+                'connection_count': row[10]
+            })
+        
+        # Get recent activity logs (last 50)
+        cursor.execute('''
+            SELECT 
+                a.timestamp, a.user_id, a.action, a.details, u.username
+            FROM activity_log a
+            LEFT JOIN users u ON a.user_id = u.id
+            ORDER BY a.timestamp DESC
+            LIMIT 50
+        ''')
+        
+        activity_logs = []
+        for row in cursor.fetchall():
+            activity_logs.append({
+                'timestamp': row[0],
+                'user_id': row[1],
+                'action': row[2],
+                'details': row[3],
+                'username': row[4]
+            })
+        
+        return render_template('admin.html',
+                             stats=stats,
+                             users=users,
+                             activity_logs=activity_logs)
+        
+    except Exception as e:
+        print(f"❌ Admin dashboard error: {str(e)}")
+        flash('Error loading admin dashboard', 'error')
+        return redirect(url_for('dashboard'))
+
+@app.route('/admin/user-details/<int:user_id>')
+@login_required
+def admin_user_details(user_id):
+    """Get detailed information about a specific user"""
+    
+    # Admin check
+    if current_user.username != 'haider':
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    try:
+        cursor = get_cursor()
+        
+        # Get user info
+        cursor.execute('''
+            SELECT id, username, email, subscription_tier, monthly_payment,
+                   max_connections, stripe_subscription_id, stripe_customer_id,
+                   subscription_status, created_at
+            FROM users WHERE id = %s
+        ''', (user_id,))
+        
+        user_row = cursor.fetchone()
+        if not user_row:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user = {
+            'id': user_row[0],
+            'username': user_row[1],
+            'email': user_row[2],
+            'subscription_tier': user_row[3],
+            'monthly_payment': user_row[4],
+            'max_connections': user_row[5],
+            'stripe_subscription_id': user_row[6],
+            'stripe_customer_id': user_row[7],
+            'subscription_status': user_row[8],
+            'created_at': user_row[9].strftime('%Y-%m-%d %H:%M:%S') if user_row[9] else None
+        }
+        
+        # Get user's connections
+        cursor.execute('''
+            SELECT id, name, host, port, database, username
+            FROM connections WHERE user_id = %s
+        ''', (user_id,))
+        
+        connections = []
+        for row in cursor.fetchall():
+            connections.append({
+                'id': row[0],
+                'name': row[1],
+                'host': row[2],
+                'port': row[3],
+                'database': row[4],
+                'username': row[5]
+            })
+        
+        # Get recent activity
+        cursor.execute('''
+            SELECT timestamp, action, details
+            FROM activity_log
+            WHERE user_id = %s
+            ORDER BY timestamp DESC
+            LIMIT 20
+        ''', (user_id,))
+        
+        recent_activity = []
+        for row in cursor.fetchall():
+            recent_activity.append({
+                'timestamp': row[0].strftime('%Y-%m-%d %H:%M:%S') if row[0] else 'N/A',
+                'action': row[1],
+                'details': row[2]
+            })
+        
+        return jsonify({
+            'success': True,
+            'user': user,
+            'connections': connections,
+            'recent_activity': recent_activity
+        })
+        
+    except Exception as e:
+        print(f"❌ Error fetching user details: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/upgrade-subscription', methods=['POST'])
 @login_required
 def upgrade_subscription():

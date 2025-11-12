@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - PG-Monitor{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-100 py-6">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <!-- Admin Header -->
+        <div class="bg-gradient-to-r from-red-600 to-pink-600 rounded-lg shadow-lg p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-white">
+                        <i class="fas fa-shield-alt mr-3"></i>Admin Dashboard
+                    </h1>
+                    <p class="text-red-100 mt-2">System Management & User Administration</p>
+                </div>
+                <div class="text-right">
+                    <div class="text-white text-sm">Logged in as</div>
+                    <div class="text-white font-bold text-lg">{{ current_user.username }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-blue-100 rounded-full p-3">
+                        <i class="fas fa-users text-blue-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm text-gray-500">Total Users</p>
+                        <p class="text-2xl font-bold text-gray-900">{{ stats.total_users }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-green-100 rounded-full p-3">
+                        <i class="fas fa-crown text-green-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm text-gray-500">Paid Users</p>
+                        <p class="text-2xl font-bold text-gray-900">{{ stats.paid_users }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-purple-100 rounded-full p-3">
+                        <i class="fas fa-dollar-sign text-purple-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm text-gray-500">Monthly Revenue</p>
+                        <p class="text-2xl font-bold text-gray-900">${{ stats.monthly_revenue }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-yellow-100 rounded-full p-3">
+                        <i class="fas fa-database text-yellow-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm text-gray-500">Total Connections</p>
+                        <p class="text-2xl font-bold text-gray-900">{{ stats.total_connections }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Users Table -->
+        <div class="bg-white rounded-lg shadow-lg mb-6">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-xl font-semibold text-gray-900">
+                    <i class="fas fa-users-cog mr-2"></i>User Management
+                </h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tier</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Connections</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stripe</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for user in users %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ user.id }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm font-medium text-gray-900">{{ user.username }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-gray-500">{{ user.email or 'N/A' }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                    {% if user.subscription_tier == 'paid' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                                    {{ user.subscription_tier|upper }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${{ user.monthly_payment }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {{ user.connection_count }} / {{ user.max_connections }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                {% if user.stripe_subscription_id %}
+                                <i class="fas fa-check-circle text-green-500" title="Has Stripe subscription"></i>
+                                {% else %}
+                                <i class="fas fa-times-circle text-gray-300" title="No Stripe subscription"></i>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {{ user.created_at.strftime('%Y-%m-%d') if user.created_at else 'N/A' }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                {% if user.subscription_tier == 'paid' %}
+                                <button onclick="resetUser({{ user.id }}, '{{ user.username }}')" 
+                                        class="text-red-600 hover:text-red-900 mr-3">
+                                    <i class="fas fa-undo mr-1"></i>Reset to Free
+                                </button>
+                                {% endif %}
+                                <button onclick="viewUserDetails({{ user.id }})" 
+                                        class="text-blue-600 hover:text-blue-900">
+                                    <i class="fas fa-info-circle mr-1"></i>Details
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Recent Activity Log -->
+        <div class="bg-white rounded-lg shadow-lg">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-xl font-semibold text-gray-900">
+                    <i class="fas fa-history mr-2"></i>Recent Activity Log
+                </h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for log in activity_logs %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') if log.timestamp else 'N/A' }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {{ log.username or 'User #' + log.user_id|string }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                                    {% if 'PAID' in log.action or 'UPGRADE' in log.action %}bg-green-100 text-green-800
+                                    {% elif 'CANCEL' in log.action or 'RESET' in log.action %}bg-red-100 text-red-800
+                                    {% elif 'ERROR' in log.action %}bg-yellow-100 text-yellow-800
+                                    {% else %}bg-blue-100 text-blue-800{% endif %}">
+                                    {{ log.action }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-500">{{ log.details }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Details Modal -->
+<div id="userDetailsModal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-900">User Details</h3>
+            <button onclick="closeUserDetails()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+        </div>
+        <div id="userDetailsContent" class="mt-4">
+            <!-- Content loaded via JavaScript -->
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function resetUser(userId, username) {
+    if (!confirm(`⚠️ Reset user "${username}" to FREE tier?\n\nThis will:\n• Change tier to FREE\n• Set max connections to 2\n• Clear Stripe IDs\n• Set monthly payment to $0\n\nContinue?`)) {
+        return;
+    }
+
+    fetch(`/admin/reset-user/${userId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✅ ' + data.message);
+            window.location.reload();
+        } else {
+            alert('❌ Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('❌ Network error: ' + error);
+    });
+}
+
+function viewUserDetails(userId) {
+    // Show modal
+    document.getElementById('userDetailsModal').classList.remove('hidden');
+    document.getElementById('userDetailsContent').innerHTML = '<div class="text-center py-4"><i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i></div>';
+
+    // Fetch user details
+    fetch(`/admin/user-details/${userId}`)
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const user = data.user;
+            const connections = data.connections;
+            const activities = data.recent_activity;
+
+            let html = `
+                <div class="space-y-4">
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-900 mb-3">Account Information</h4>
+                        <div class="grid grid-cols-2 gap-3 text-sm">
+                            <div><span class="text-gray-600">User ID:</span> <span class="font-medium">${user.id}</span></div>
+                            <div><span class="text-gray-600">Username:</span> <span class="font-medium">${user.username}</span></div>
+                            <div><span class="text-gray-600">Email:</span> <span class="font-medium">${user.email || 'N/A'}</span></div>
+                            <div><span class="text-gray-600">Tier:</span> 
+                                <span class="px-2 py-1 rounded text-xs font-semibold ${user.subscription_tier === 'paid' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}">
+                                    ${user.subscription_tier.toUpperCase()}
+                                </span>
+                            </div>
+                            <div><span class="text-gray-600">Monthly Payment:</span> <span class="font-medium">$${user.monthly_payment}</span></div>
+                            <div><span class="text-gray-600">Max Connections:</span> <span class="font-medium">${user.max_connections}</span></div>
+                            <div><span class="text-gray-600">Status:</span> <span class="font-medium">${user.subscription_status || 'N/A'}</span></div>
+                            <div><span class="text-gray-600">Created:</span> <span class="font-medium">${user.created_at || 'N/A'}</span></div>
+                        </div>
+                    </div>
+
+                    ${user.stripe_subscription_id ? `
+                    <div class="bg-green-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-900 mb-3">Stripe Information</h4>
+                        <div class="text-sm space-y-2">
+                            <div><span class="text-gray-600">Subscription ID:</span> <code class="text-xs bg-white px-2 py-1 rounded">${user.stripe_subscription_id}</code></div>
+                            <div><span class="text-gray-600">Customer ID:</span> <code class="text-xs bg-white px-2 py-1 rounded">${user.stripe_customer_id || 'N/A'}</code></div>
+                        </div>
+                    </div>
+                    ` : ''}
+
+                    <div class="bg-blue-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-900 mb-3">Connections (${connections.length})</h4>
+                        ${connections.length > 0 ? `
+                            <div class="space-y-2 text-sm">
+                                ${connections.map(conn => `
+                                    <div class="bg-white p-2 rounded">
+                                        <strong>${conn.name}</strong><br>
+                                        <code class="text-xs text-gray-600">${conn.host}:${conn.port}/${conn.database}</code>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : '<p class="text-gray-500 text-sm">No connections</p>'}
+                    </div>
+
+                    <div class="bg-yellow-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-900 mb-3">Recent Activity</h4>
+                        ${activities.length > 0 ? `
+                            <div class="space-y-2 text-sm max-h-60 overflow-y-auto">
+                                ${activities.map(act => `
+                                    <div class="bg-white p-2 rounded">
+                                        <div class="flex justify-between">
+                                            <span class="font-medium text-xs ${
+                                                act.action.includes('ERROR') ? 'text-red-600' :
+                                                act.action.includes('CANCEL') ? 'text-orange-600' :
+                                                act.action.includes('PAID') ? 'text-green-600' : 'text-blue-600'
+                                            }">${act.action}</span>
+                                            <span class="text-xs text-gray-500">${act.timestamp}</span>
+                                        </div>
+                                        <div class="text-xs text-gray-600 mt-1">${act.details}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : '<p class="text-gray-500 text-sm">No recent activity</p>'}
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('userDetailsContent').innerHTML = html;
+        } else {
+            document.getElementById('userDetailsContent').innerHTML = 
+                '<div class="text-center text-red-600">❌ Failed to load user details</div>';
+        }
+    })
+    .catch(error => {
+        document.getElementById('userDetailsContent').innerHTML = 
+            '<div class="text-center text-red-600">❌ Network error</div>';
+    });
+}
+
+function closeUserDetails() {
+    document.getElementById('userDetailsModal').classList.add('hidden');
+}
+
+// Close modal on outside click
+document.getElementById('userDetailsModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeUserDetails();
+    }
+});
+</script>
+{% endblock %}
