@@ -182,6 +182,28 @@ def init_database():
                 user_agent TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS metrics_history (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                connection_id INTEGER REFERENCES connections(id) ON DELETE CASCADE,
+                snapshot_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                db_size TEXT,
+                connections_count INTEGER,
+                tps REAL,
+                cache_hit_ratio REAL,
+                rollback_rate REAL,
+                deadlocks INTEGER,
+                bloat_percentage REAL,
+                index_usage REAL,
+                slow_queries_count INTEGER,
+                metrics_json TEXT
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_metrics_history_lookup 
+            ON metrics_history (user_id, connection_id, snapshot_time DESC)
             """
         ]
     else:
@@ -229,6 +251,30 @@ def init_database():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS metrics_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                connection_id INTEGER NOT NULL,
+                snapshot_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                db_size TEXT,
+                connections_count INTEGER,
+                tps REAL,
+                cache_hit_ratio REAL,
+                rollback_rate REAL,
+                deadlocks INTEGER,
+                bloat_percentage REAL,
+                index_usage REAL,
+                slow_queries_count INTEGER,
+                metrics_json TEXT,
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                FOREIGN KEY (connection_id) REFERENCES connections (id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_metrics_history_lookup 
+            ON metrics_history (user_id, connection_id, snapshot_time DESC)
             """
         ]
     

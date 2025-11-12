@@ -1003,6 +1003,50 @@ def user_stats():
         'connections_remaining': user_data[2] - connection_count
     })
 
+@app.route('/api/cancel-subscription', methods=['POST'])
+@login_required
+def cancel_subscription():
+    """Cancel user subscription and revert to free tier"""
+    if current_user.subscription_tier != 'paid':
+        return jsonify({'error': 'You are not on a paid plan'}), 400
+    
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Cancel Stripe subscription if exists
+        if current_user.stripe_subscription_id:
+            try:
+                stripe.Subscription.delete(current_user.stripe_subscription_id)
+            except stripe.error.StripeError as e:
+                print(f"Stripe cancellation warning: {str(e)}")
+                # Continue anyway to update local database
+        
+        # Revert user to free tier
+        cursor.execute("""
+            UPDATE users 
+            SET subscription_tier = 'free',
+                monthly_payment = NULL,
+                max_connections = 2,
+                subscription_status = 'canceled',
+                stripe_subscription_id = NULL
+            WHERE id = ?
+        """, (current_user.id,))
+        
+        conn.commit()
+        conn.close()
+        
+        log_activity(current_user.id, 'SUBSCRIPTION_CANCELED', 'User canceled Pro membership')
+        
+        return jsonify({
+            'success': True,
+            'message': 'Membership canceled. You are now on the Free tier (2 connections).'
+        })
+        
+    except Exception as e:
+        print(f"Error canceling subscription: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/save-metrics-snapshot/<int:connection_id>', methods=['POST'])
 @login_required
 def save_metrics_snapshot(connection_id):
@@ -1171,6 +1215,28 @@ def download_report(connection_id):
         
         snapshots = cursor.fetchall()
         conn.close()
+        
+        # If no snapshots, return message
+        if not snapshots or len(snapshots) == 0:
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerow(['PG-Monitor Performance Report'])
+            writer.writerow([f'Connection: {conn_data[0]}'])
+            writer.writerow([f'Host: {conn_data[1]}:{conn_data[2]}'])
+            writer.writerow([f'Database: {conn_data[3]}'])
+            writer.writerow([f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'])
+            writer.writerow([])
+            writer.writerow(['No historical data available yet.'])
+            writer.writerow(['Snapshots are automatically saved every 30 minutes for paid users.'])
+            writer.writerow(['Please check back later for historical metrics data.'])
+            
+            output.seek(0)
+            filename = f'pg_monitor_report_{conn_data[0]}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+            
+            return output.getvalue(), 200, {
+                'Content-Type': 'text/csv',
+                'Content-Disposition': f'attachment; filename={filename}'
+            }
         
         # Create CSV
         output = StringIO()

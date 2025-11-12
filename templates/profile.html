@@ -128,6 +128,10 @@
                         <a href="{{ url_for('pricing') }}" class="block mt-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-center px-4 py-2 rounded-md font-semibold">
                             <i class="fas fa-rocket mr-2"></i>Upgrade to Unlimited
                         </a>
+                        {% else %}
+                        <button onclick="confirmCancelSubscription()" class="block w-full mt-4 bg-red-100 hover:bg-red-200 text-red-700 text-center px-4 py-2 rounded-md font-semibold transition-colors">
+                            <i class="fas fa-times-circle mr-2"></i>Cancel Membership
+                        </button>
                         {% endif %}
                     </div>
                 </div>
@@ -182,4 +186,47 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function confirmCancelSubscription() {
+    if (confirm('⚠️ Are you sure you want to cancel your Pro membership?\n\n' +
+                'You will:\n' +
+                '• Lose unlimited connections (back to 2)\n' +
+                '• Lose historical metrics & CSV reports\n' +
+                '• Keep existing connections until limit\n\n' +
+                'This action cannot be undone.')) {
+        
+        // Show loading
+        const btn = event.target;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Canceling...';
+        btn.disabled = true;
+        
+        // Call cancel API
+        fetch('/api/cancel-subscription', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('✅ ' + data.message);
+                window.location.reload();
+            } else {
+                alert('❌ ' + data.error);
+                btn.innerHTML = '<i class="fas fa-times-circle mr-2"></i>Cancel Membership';
+                btn.disabled = false;
+            }
+        })
+        .catch(error => {
+            alert('❌ Error: ' + error);
+            btn.innerHTML = '<i class="fas fa-times-circle mr-2"></i>Cancel Membership';
+            btn.disabled = false;
+        });
+    }
+}
+</script>
 {% endblock %}

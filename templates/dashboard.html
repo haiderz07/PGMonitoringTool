@@ -2107,24 +2107,12 @@ $(document).ready(function() {
 // Download CSV report function
 function downloadReport() {
     if (!selectedConnectionId) {
-        alert('Please select a connection first');
+        alert('⚠️ Please select a connection first');
         return;
     }
     
-    // Show loading state
-    const btn = event.target.closest('button');
-    const originalHTML = btn.innerHTML;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
-    btn.disabled = true;
-    
-    // Download CSV
-    window.location.href = `/api/download-report/${selectedConnectionId}`;
-    
-    // Reset button after delay
-    setTimeout(() => {
-        btn.innerHTML = originalHTML;
-        btn.disabled = false;
-    }, 2000);
+    // Open download in new tab (prevents page redirect)
+    window.open(`/api/download-report/${selectedConnectionId}`, '_blank');
 }
 </script>
 {% endblock %}
