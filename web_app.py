@@ -915,10 +915,10 @@ def admin_dashboard():
         # Get recent activity logs (last 50)
         cursor.execute('''
             SELECT 
-                a.timestamp, a.user_id, a.action, a.details, u.username
+                a.created_at, a.user_id, a.activity_type, a.description, u.username
             FROM activity_log a
             LEFT JOIN users u ON a.user_id = u.id
-            ORDER BY a.timestamp DESC
+            ORDER BY a.created_at DESC
             LIMIT 50
         ''')
         
@@ -1005,10 +1005,10 @@ def admin_user_details(user_id):
         
         # Get recent activity
         cursor.execute('''
-            SELECT timestamp, action, details
+            SELECT created_at, activity_type, description
             FROM activity_log
             WHERE user_id = %s
-            ORDER BY timestamp DESC
+            ORDER BY created_at DESC
             LIMIT 20
         ''', (user_id,))
         
