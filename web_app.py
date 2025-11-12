@@ -1011,41 +1011,126 @@ def cancel_subscription():
         return jsonify({'error': 'You are not on a paid plan'}), 400
     
     try:
-        conn = get_db()
-        cursor = conn.cursor()
+        stripe_canceled = False
+        stripe_error = None
         
         # Cancel Stripe subscription if exists
         if current_user.stripe_subscription_id:
             try:
-                stripe.Subscription.delete(current_user.stripe_subscription_id)
+                # Cancel the subscription at Stripe to stop future billing
+                deleted_subscription = stripe.Subscription.delete(current_user.stripe_subscription_id)
+                stripe_canceled = True
+                log_activity(current_user.id, 'STRIPE_CANCEL', f'Stripe subscription {current_user.stripe_subscription_id} canceled successfully')
+                print(f"✅ Stripe subscription canceled: {deleted_subscription.id}, status: {deleted_subscription.status}")
+                
+            except stripe.error.InvalidRequestError as e:
+                # Subscription doesn't exist or already canceled
+                stripe_error = f"Stripe subscription not found (may already be canceled): {str(e)}"
+                print(f"⚠️ {stripe_error}")
+                log_activity(current_user.id, 'STRIPE_CANCEL_WARNING', stripe_error)
+                
             except stripe.error.StripeError as e:
-                print(f"Stripe cancellation warning: {str(e)}")
+                # Other Stripe errors
+                stripe_error = f"Stripe error: {str(e)}"
+                print(f"❌ {stripe_error}")
+                log_activity(current_user.id, 'STRIPE_CANCEL_ERROR', stripe_error)
                 # Continue anyway to update local database
         
-        # Revert user to free tier
+        # Revert user to free tier in database
+        conn = get_db()
+        cursor = conn.cursor()
+        
         cursor.execute("""
             UPDATE users 
             SET subscription_tier = 'free',
                 monthly_payment = NULL,
                 max_connections = 2,
                 subscription_status = 'canceled',
-                stripe_subscription_id = NULL
+                stripe_subscription_id = NULL,
+                stripe_customer_id = NULL
             WHERE id = ?
         """, (current_user.id,))
         
         conn.commit()
         conn.close()
         
-        log_activity(current_user.id, 'SUBSCRIPTION_CANCELED', 'User canceled Pro membership')
+        log_activity(current_user.id, 'SUBSCRIPTION_CANCELED', 'User reverted to Free tier')
+        
+        # Prepare response message
+        if stripe_canceled:
+            message = '✅ Membership canceled successfully! Stripe billing stopped. You are now on the Free tier (2 connections).'
+        elif stripe_error:
+            message = f'⚠️ Membership canceled locally. {stripe_error} You are now on the Free tier (2 connections).'
+        else:
+            message = '✅ Membership canceled. You are now on the Free tier (2 connections).'
         
         return jsonify({
             'success': True,
-            'message': 'Membership canceled. You are now on the Free tier (2 connections).'
+            'message': message,
+            'stripe_canceled': stripe_canceled
         })
         
     except Exception as e:
-        print(f"Error canceling subscription: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        print(f"❌ Error canceling subscription: {str(e)}")
+        log_activity(current_user.id, 'CANCEL_ERROR', f'Error: {str(e)}')
+        return jsonify({'error': f'Failed to cancel subscription: {str(e)}'}), 500
+
+@app.route('/admin/reset-user/<int:user_id>', methods=['POST'])
+@login_required
+def admin_reset_user(user_id):
+    """Admin endpoint to reset a user to free tier (removes invalid paid status)"""
+    
+    # Simple admin check - you can enhance this with a proper admin role later
+    if current_user.username != 'haider':  # Change to your admin username
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    try:
+        cursor = get_cursor()
+        
+        # Get target user info
+        cursor.execute('SELECT username, subscription_tier FROM users WHERE id = %s', (user_id,))
+        user_data = cursor.fetchone()
+        
+        if not user_data:
+            return jsonify({'error': 'User not found'}), 404
+        
+        username, current_tier = user_data
+        
+        # Reset to free tier
+        cursor.execute('''
+            UPDATE users 
+            SET subscription_tier = 'free',
+                monthly_payment = 0,
+                max_connections = 2,
+                stripe_subscription_id = NULL,
+                stripe_customer_id = NULL,
+                subscription_status = 'inactive'
+            WHERE id = %s
+        ''', (user_id,))
+        
+        # Log the action
+        log_activity(current_user.id, 'ADMIN_RESET_USER', 
+                    f'Reset user {username} (ID: {user_id}) from {current_tier} to free tier')
+        log_activity(user_id, 'ACCOUNT_RESET', 
+                    f'Account reset to free tier by admin {current_user.username}')
+        
+        print(f"✅ Admin {current_user.username} reset user {username} to free tier")
+        
+        return jsonify({
+            'success': True,
+            'message': f'User {username} reset to FREE tier successfully',
+            'details': {
+                'user_id': user_id,
+                'username': username,
+                'previous_tier': current_tier,
+                'new_tier': 'free',
+                'max_connections': 2
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Admin reset error: {str(e)}")
+        return jsonify({'error': f'Failed to reset user: {str(e)}'}), 500
 
 @app.route('/api/save-metrics-snapshot/<int:connection_id>', methods=['POST'])
 @login_required
