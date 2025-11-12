@@ -859,31 +859,14 @@ def upgrade_subscription():
     stripe_api_key = os.environ.get('STRIPE_SECRET_KEY')
     
     if not stripe_api_key or not STRIPE_PRICE_ID:
-        # Development mode - simulate upgrade
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE users 
-            SET subscription_tier = 'paid',
-                monthly_payment = ?,
-                max_connections = 999,
-                subscription_status = 'active',
-                last_payment_date = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (amount, current_user.id))
-        conn.commit()
-        conn.close()
-        
-        log_activity(current_user.id, 'UPGRADE', f'Upgraded to paid tier: ${amount}/month (dev mode)')
-        
+        # Stripe not configured - show error
         return jsonify({
-            'success': True,
-            'message': f'✅ Upgraded successfully! Now paying ${amount}/month with unlimited connections.',
-            'redirect': url_for('dashboard')
-        })
+            'success': False,
+            'message': '⚠️ Payment system not configured. Please contact support at haiderdba98@gmail.com'
+        }), 500
     
     try:
-        # Production mode - Create Stripe Checkout Session
+        # Create Stripe Checkout Session
         checkout_session = stripe.checkout.Session.create(
             customer_email=current_user.email,
             payment_method_types=['card'],
@@ -930,41 +913,64 @@ def payment_success():
     """Handle successful payment"""
     session_id = request.args.get('session_id')
     
-    if session_id:
-        try:
-            # Retrieve the session to verify payment
-            session = stripe.checkout.Session.retrieve(session_id)
+    if not session_id:
+        flash('⚠️ No payment session found.', 'warning')
+        return redirect(url_for('pricing'))
+    
+    try:
+        # Retrieve the session to verify payment
+        session = stripe.checkout.Session.retrieve(session_id)
+        
+        # Verify session belongs to current user
+        if int(session.metadata.get('user_id', 0)) != current_user.id:
+            flash('⚠️ Invalid payment session.', 'error')
+            return redirect(url_for('dashboard'))
+        
+        if session.payment_status == 'paid':
+            # Double-check user isn't already upgraded
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT subscription_tier FROM users WHERE id = ?", (current_user.id,))
+            current_tier = cursor.fetchone()[0]
             
-            if session.payment_status == 'paid':
-                # Update user subscription
-                conn = get_db()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    UPDATE users 
-                    SET subscription_tier = 'paid',
-                        monthly_payment = ?,
-                        max_connections = 999,
-                        subscription_status = 'active',
-                        stripe_customer_id = ?,
-                        stripe_subscription_id = ?,
-                        last_payment_date = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (
-                    float(session.metadata.get('monthly_amount', 0)),
-                    session.customer,
-                    session.subscription,
-                    current_user.id
-                ))
-                conn.commit()
+            if current_tier == 'paid':
+                flash('ℹ️ You are already a Pro subscriber!', 'info')
                 conn.close()
-                
-                log_activity(current_user.id, 'UPGRADE_SUCCESS', f'Successfully upgraded via Stripe')
-                flash('🎉 Payment successful! Welcome to PG-Monitor Pro!', 'success')
-            else:
-                flash('⚠️ Payment verification pending...', 'warning')
-                
-        except Exception as e:
-            flash(f'⚠️ Error verifying payment: {str(e)}', 'error')
+                return redirect(url_for('dashboard'))
+            
+            # Update user subscription
+            cursor.execute("""
+                UPDATE users 
+                SET subscription_tier = 'paid',
+                    monthly_payment = ?,
+                    max_connections = 999,
+                    subscription_status = 'active',
+                    stripe_customer_id = ?,
+                    stripe_subscription_id = ?,
+                    last_payment_date = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (
+                float(session.metadata.get('monthly_amount', 0)),
+                session.customer,
+                session.subscription,
+                current_user.id
+            ))
+            conn.commit()
+            conn.close()
+            
+            log_activity(current_user.id, 'UPGRADE_SUCCESS', f'Successfully upgraded via Stripe - ${session.metadata.get("monthly_amount")}/month')
+            flash('🎉 Payment successful! Welcome to PG-Monitor Pro with unlimited connections!', 'success')
+        elif session.payment_status == 'unpaid':
+            flash('⚠️ Payment is pending. Please complete the payment.', 'warning')
+        else:
+            flash(f'⚠️ Payment status: {session.payment_status}', 'warning')
+            
+    except stripe.error.StripeError as e:
+        flash(f'⚠️ Stripe error: {str(e)}', 'error')
+        log_activity(current_user.id, 'PAYMENT_ERROR', f'Stripe error: {str(e)}')
+    except Exception as e:
+        flash(f'⚠️ Error verifying payment: {str(e)}', 'error')
+        log_activity(current_user.id, 'PAYMENT_ERROR', f'Error: {str(e)}')
     
     return redirect(url_for('dashboard'))
 
